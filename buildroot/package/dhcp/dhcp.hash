@@ -1,0 +1,4 @@
+# Verified from https://ftp.isc.org/isc/dhcp/4.4.1/dhcp-4.4.1.tar.gz.sha256.asc
+sha256 0e3ec6b4c2a05ec0148874bcd999a66d05518378d77421f607fb0bc9d0135818  dhcp-4.4.3.tar.gz
+# Locally calculated
+sha256 18add1790d1ed47d6ef6f3ed5945aa0cb2f7785fa8bc7fd859f8ae2f9f78567d  LICENSE

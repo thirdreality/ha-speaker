@@ -1,0 +1,57 @@
+#!/bin/sh
+#Mount things needed by this script
+/bin/mount -t sysfs sysfs /sys
+/bin/mount -t devtmpfs devtmpfs /dev
+/bin/mount -t proc proc /proc
+
+#Create device nodes
+mdev -s
+
+if [ -f /modules/ramdisk/ramdisk_install.sh ]; then
+    cd /modules/ramdisk/
+    /modules/ramdisk/ramdisk_install.sh
+    cd -
+fi
+
+link_partition=0
+upstream_emmc_mount() {
+  echo " do upstream emmc mount"
+  if [ ! -f /dev/system ];then
+    echo "/dev/system not exist!"
+    if [  -d /sys/devices/platform/soc/ffe00000.bus/ffe07000.mmc/mmc_host/mmc0/mmc0:0001/block/mmcblk0/mmcblk0p1/ ]; then
+      cd /sys/devices/platform/soc/ffe00000.bus/ffe07000.mmc/mmc_host/mmc0/mmc0:0001/block/mmcblk0/
+      link_partition=1
+    elif [  -d /sys/devices/platform/soc/fe012000.mmc/mmc_host/mmc0/mmc0\:0001/block/mmcblk0/mmcblk0p1/ ]; then
+      cd /sys/devices/platform/soc/fe012000.mmc/mmc_host/mmc0/mmc0\:0001/block/mmcblk0/
+      link_partition=1
+    fi
+
+    if [ $link_partition -eq 1 ]; then
+      for part in `ls | grep mmcblk0p`
+      do
+        cd $part
+        echo "part = "$part
+        major=`cat uevent | grep MAJOR= | sed 's/.*=//'`
+        minor=`cat uevent | grep MINOR= | sed 's/.*=//'`
+        partname=`cat uevent | grep PARTNAME= | sed 's/.*=//'`
+        #echo "major=" $major
+        #echo "minor=" $minor
+        #echo "partname=" $partname
+        echo mknod /dev/$partname b $major $minor
+        mknod /dev/$partname b $major $minor
+        #ls -l /dev/$partname
+        cd ..
+      done
+    fi
+
+  else
+    echo "/dev/system exist!"
+  fi
+}
+upstream_emmc_mount
+
+#This will only be run if the exec above failed
+echo "Failed to switch root, dropping to a shell"
+exec /sbin/init
+
+

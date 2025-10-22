@@ -1,0 +1,73 @@
+#!/bin/sh
+
+[ -f /etc/dnsmasq.conf ] || exit 0
+
+# /etc/init.d/S42wifi will creat wifi_chip_id_vendor
+# determine wifi_chip_id is 0x02d0,if yes it will create wlan1 for ap
+# otherwise it will use wlan0 for ap
+
+dnsmasq_start()
+{
+  for i in $(seq 1 10)
+  do
+    ifconfig wlan0 > /dev/null
+    if [ $? -eq 0 ]
+    then
+      break
+    fi
+    sleep 0.5
+  done
+  WLAN=wlan0
+  lsusb | grep "0bda:" | grep "8812\|b812\|f179\|d723\|018c\|b720"
+  if [ $? -eq 0 ]; then
+    WLAN=wlan0
+  else
+    inf=`wifi_power 2 | awk -F = '{print $2}'`
+
+    if [ "${inf}" = "" -o "${inf}" = "sdio" ];then
+      dir="/sys/bus/mmc/devices/sdio:0001/sdio:0001:1/"
+    else
+      dir="/sys/bus/mmc/devices/${inf}:0001/${inf}:0001:1/"
+    fi
+    wifi_device_id=`cat "${dir}/device"`
+    wifi_vendor_id=`cat "${dir}/vendor"`
+    if [ "${wifi_device_id}" = 0xa9a6 ]
+    then
+      WLAN=wlan0
+    else
+      case "${wifi_vendor_id}" in
+        0x02d0)
+          WLAN=wlan1
+          ;;
+        0x024c|0x0271)
+          WLAN=wlan0
+          ;;
+      esac
+    fi
+  fi
+
+  printf "Starting dnsmasq: "
+  start-stop-daemon -S -x /usr/sbin/dnsmasq -- -i$WLAN --dhcp-option=3,192.168.2.1 --dhcp-range=192.168.2.50,192.168.2.200,12h -p100
+  [ $? = 0 ] && echo "OK" || echo "FAIL"
+
+}
+case "$1" in
+	start)
+        dnsmasq_start &
+		;;
+	stop)
+		printf "Stopping dnsmasq: "
+		start-stop-daemon -K -q -x /usr/sbin/dnsmasq
+		[ $? = 0 ] && echo "OK" || echo "FAIL"
+		;;
+        netready|netup|netdown|netchange) ;;
+	restart|reload)
+		$0 stop
+		$0 start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+esac
+
+exit 0

@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config AMLOGIC_PINCTRL_MODULE
+	tristate "support pinctrl build option"
+	select PINCTRL_MESON
+	default y
+	help
+		amlogic pinctrl driver compile option
+		select y for built-in
+		select m for ko
+		select n for disable
+
+menuconfig PINCTRL_MESON
+	bool "Amlogic SoC pinctrl drivers"
+	depends on ARCH_MESON
+	depends on OF
+	select PINMUX
+	select PINCONF
+	select GENERIC_PINCONF
+	select GPIOLIB
+	select OF_GPIO
+	select REGMAP_MMIO
+
+if PINCTRL_MESON
+
+config PINCTRL_MESON8
+	bool "Meson 8 SoC pinctrl driver"
+	depends on ARM
+	select PINCTRL_MESON8_PMX
+	default n
+
+config PINCTRL_MESON8B
+	bool "Meson 8b SoC pinctrl driver"
+	depends on ARM
+	select PINCTRL_MESON8_PMX
+	default n
+
+config PINCTRL_MESON_GXBB
+	bool "Meson gxbb SoC pinctrl driver"
+	depends on ARM64
+	select PINCTRL_MESON8_PMX
+	default n
+
+config PINCTRL_MESON_GXL
+	bool "Meson gxl SoC pinctrl driver"
+	depends on ARM64
+	select PINCTRL_MESON8_PMX
+	default n
+
+config PINCTRL_MESON8_PMX
+	bool
+
+config PINCTRL_MESON_AXG
+	bool "Meson axg Soc pinctrl driver"
+	depends on ARM64
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_AXG_PMX
+	bool
+
+config PINCTRL_MESON_G12A
+	bool "Meson g12a Soc pinctrl driver"
+	depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_A1
+	bool "Meson a1 Soc pinctrl driver"
+	depends on ARM64
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_TM2
+	bool "Meson tm2 Soc pinctrl driver"
+	depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_SC2
+	bool "Meson sc2 Soc pinctrl driver"
+	depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_T5D
+	bool "Meson t5d Soc pinctrl driver"
+	depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_T7
+	bool "Meson t7 Soc pinctrl driver"
+	depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_S4
+	bool "Meson s4 Soc pinctrl driver"
+	depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_T3
+	bool "Meson t3 Soc pinctrl driver"
+	depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_P1
+	bool "Meson p1 Soc pinctrl driver"
+	depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+	select PINCTRL_MESON_AXG_PMX
+	default n
+
+config PINCTRL_MESON_T5W
+  bool "Meson t5w Soc pinctrl driver"
+  depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+  select PINCTRL_MESON_AXG_PMX
+  default n
+
+config PINCTRL_MESON_A5
+  bool "Meson a5 Soc pinctrl driver"
+  depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+  select PINCTRL_MESON_AXG_PMX
+  default n
+
+config PINCTRL_MESON_S5
+  bool "Meson s5 Soc pinctrl driver"
+  depends on ARM64 || AMLOGIC_ARMV8_AARCH32
+  select PINCTRL_MESON_AXG_PMX
+  default n
+
+endif

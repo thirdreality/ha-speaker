@@ -1,0 +1,47 @@
+#!/bin/sh
+
+WPA_SUPPLICANT="wpa_supplicant"
+DAEMON_WPA="/usr/sbin/$WPA_SUPPLICANT"
+PIDFILE_WPA="/var/run/$WPA_SUPPLICANT.pid"
+
+wifi_start()
+{
+    killall hostapd
+    killall wpa_supplicant
+    killall dnsmasq
+    killall dhcpcd
+
+    /usr/bin/multi_wifi_load_driver station 1
+
+    mkdir -p /etc/wifi
+    mkdir -p /data/vendor/wifi
+
+    ifconfig wlan0 up > /dev/null
+    ifconfig wlan0 &> /dev/null
+    ifconfig wlan0 0.0.0.0
+    # iw wlan0 interface add wlan1 type managed
+    iw wlan0 interface add wlan1 type ap
+
+    start-stop-daemon -S -m -p "$PIDFILE_WPA" -b -x "$DAEMON_WPA" -- -Dnl80211 -iwlan0 -c/etc/wpa_supplicant.conf
+
+    # /etc/init.d/LTE.sh &
+}
+
+case "$1" in
+    start)
+        wifi_start &
+    ;;
+    stop)
+        ifconfig wlan0 down
+        $MULTI_WIFI station 0
+    ;;
+    restart)
+        $0 stop
+        $0 start
+    ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+esac
+
+exit $?

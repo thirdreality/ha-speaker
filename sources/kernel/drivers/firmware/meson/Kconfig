@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Amlogic Secure Monitor driver
+#
+config MESON_SM
+	tristate "Meson secure monitor"
+	default n
+	help
+	  Say y here to enable the Amlogic secure monitor driver

@@ -1,0 +1,54 @@
+From d8c4e7a2bbb889dbef979b65e46cb9d1fb392758 Mon Sep 17 00:00:00 2001
+From: Song Zhao <song.zhao@amlogic.com>
+Date: Wed, 2 Dec 2020 09:38:26 -0800
+Subject: [PATCH 1/2] support ac-4
+
+---
+ gst/isomp4/fourcc.h        | 1 +
+ gst/isomp4/qtdemux.c       | 5 +++++
+ gst/isomp4/qtdemux_types.c | 1 +
+ 3 files changed, 7 insertions(+)
+
+diff --git a/gst/isomp4/fourcc.h b/gst/isomp4/fourcc.h
+index 6c425e6..ee283d1 100644
+--- a/gst/isomp4/fourcc.h
++++ b/gst/isomp4/fourcc.h
+@@ -85,6 +85,7 @@ G_BEGIN_DECLS
+ #define FOURCC__wrt     GST_MAKE_FOURCC(0xa9,'w','r','t')
+ #define FOURCC_aART     GST_MAKE_FOURCC('a','A','R','T')
+ #define FOURCC_ac_3     GST_MAKE_FOURCC('a','c','-','3')
++#define FOURCC_ac_4     GST_MAKE_FOURCC('a','c','-','4')
+ #define FOURCC_agsm     GST_MAKE_FOURCC('a','g','s','m')
+ #define FOURCC_alac     GST_MAKE_FOURCC('a','l','a','c')
+ #define FOURCC_fLaC     GST_MAKE_FOURCC('f','L','a','C')
+diff --git a/gst/isomp4/qtdemux.c b/gst/isomp4/qtdemux.c
+index ad07c1e..742c0f9 100644
+--- a/gst/isomp4/qtdemux.c
++++ b/gst/isomp4/qtdemux.c
+@@ -15276,6 +15276,11 @@ qtdemux_audio_caps (GstQTDemux * qtdemux, QtDemuxStream * stream,
+           "framed", G_TYPE_BOOLEAN, TRUE, NULL);
+       entry->sampled = TRUE;
+       break;
++    case FOURCC_ac_4:
++      _codec ("AC-4 audio");
++      caps = gst_caps_new_simple ("audio/x-ac4",
++          "framed", G_TYPE_BOOLEAN, TRUE, NULL);
++      break;
+     case GST_MAKE_FOURCC ('d', 't', 's', 'c'):
+     case GST_MAKE_FOURCC ('D', 'T', 'S', ' '):
+       _codec ("DTS audio");
+diff --git a/gst/isomp4/qtdemux_types.c b/gst/isomp4/qtdemux_types.c
+index 9ab2e7e..bea1b77 100644
+--- a/gst/isomp4/qtdemux_types.c
++++ b/gst/isomp4/qtdemux_types.c
+@@ -213,6 +213,7 @@ static const QtNodeType qt_node_types[] = {
+   {FOURCC_pssh, "protection system specific header", 0},
+   {FOURCC_tenc, "track encryption", 0},
+   {FOURCC_stpp, "XML subtitle sample entry", 0},
++  {FOURCC_ac_4, "AC4SampleEntry", 0},
+   {FOURCC_clcp, "Closed Caption", 0},
+   {FOURCC_av01, "AV1 Sample Entry", 0},
+   {FOURCC_av1C, "AV1 Codec Configuration", 0},
+-- 
+2.24.1
+

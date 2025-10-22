@@ -1,0 +1,31 @@
+From 1d81f22745d84e846e9b31eb137335b9d760ab2c Mon Sep 17 00:00:00 2001
+From: Song Zhao <song.zhao@amlogic.com>
+Date: Tue, 1 Feb 2022 11:55:58 -0800
+Subject: [PATCH] Add sbr buffer flushing for aac decoder to avoid dirty output
+
+---
+ libavcodec/aacdec_template.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/libavcodec/aacdec_template.c b/libavcodec/aacdec_template.c
+index 8b46ce6..4ed7102 100644
+--- a/libavcodec/aacdec_template.c
++++ b/libavcodec/aacdec_template.c
+@@ -506,8 +506,14 @@ static void flush(AVCodecContext *avctx)
+         for (i = 0; i < MAX_ELEM_ID; i++) {
+             ChannelElement *che = ac->che[type][i];
+             if (che) {
++                // LTP buffer related data buffer
++                // or windowing overlapping
+                 for (j = 0; j <= 1; j++) {
+                     memset(che->ch[j].saved, 0, sizeof(che->ch[j].saved));
++                    memset(che->ch[j].coeffs, 0, sizeof(che->ch[j].coeffs));
++                    // sbr context should be reseted and function pointers should be applied too
++                    memset(&che->sbr, 0, sizeof(che->sbr));
++                    AAC_RENAME(ff_aac_sbr_ctx_init)(ac, &che->sbr, type);
+                 }
+             }
+         }
+-- 
+2.32.0
+

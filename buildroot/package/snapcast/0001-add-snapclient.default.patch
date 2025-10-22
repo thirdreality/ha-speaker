@@ -1,0 +1,26 @@
+From a6934c7e5d17fcac66ada04f958d1b218f828f98 Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Mon, 25 Aug 2025 16:35:17 +0800
+Subject: [PATCH] add snapclient.default
+
+---
+ client/etc/snapclient.default | 7 +++++++
+ 1 file changed, 7 insertions(+)
+ create mode 100644 client/etc/snapclient.default
+
+diff --git a/client/etc/snapclient.default b/client/etc/snapclient.default
+new file mode 100644
+index 0000000..c1a1633
+--- /dev/null
++++ b/client/etc/snapclient.default
+@@ -0,0 +1,7 @@
++# Start the client, used only by the init.d script
++START_SNAPCLIENT=true
++
++# Additional command line options that will be passed to snapclient
++# note that user/group should be configured in the init.d script or the systemd unit file
++# For a list of available options, invoke "snapclient --help" 
++SNAPCLIENT_OPTS="-s softvol"
+-- 
+2.40.1
+

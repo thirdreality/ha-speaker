@@ -1,0 +1,88 @@
+From d1c61542f023ccb7d338a4fe58ee74be998175e9 Mon Sep 17 00:00:00 2001
+From: lingjie li <lingjie.li@amlogic.com>
+Date: Wed, 27 May 2020 17:01:24 +0800
+Subject: [PATCH] Add force_refresh api and register each weston_output into
+ meson-display framework.
+
+Current only support one weston-output at the same time, And the weston-output will
+change when each connector changed. You may see the weston-output's
+address not change, becase it's buffer calloc after the free of last weston-output.
+---
+ libweston/compositor-drm.c | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/libweston/compositor-drm.c b/libweston/compositor-drm.c
+index a84f72f..d461c86 100644
+--- a/libweston/compositor-drm.c
++++ b/libweston/compositor-drm.c
+@@ -6306,7 +6306,8 @@ static int drm_helper_remove_helper_timer() {
+ 	}
+ }
+ 
+-static void drm_output_refresh_force(struct weston_compositor *compositor) {
++static void drm_output_refresh_force(output_ctx ctx) {
++	struct weston_compositor *compositor = ((struct weston_output *)ctx)->compositor;
+ 	weston_compositor_damage_all(compositor);
+ 	if (drm_helper_timer == NULL) {
+ 		weston_log("drm helper timer create failed, can't update ouput immediate.\n");
+@@ -6315,6 +6316,7 @@ static void drm_output_refresh_force(struct weston_compositor *compositor) {
+ 	//trigger a wl_event_loop_dispatch_idle
+ 	wl_event_source_timer_update(drm_helper_timer, 16);
+ }
++
+ static int drm_output_switch_mode_helper(output_ctx ctx, drm_helper_mode* mode) {
+ 	struct weston_mode m;
+ 	int ratio = 0;
+@@ -6332,7 +6334,7 @@ static int drm_output_switch_mode_helper(output_ctx ctx, drm_helper_mode* mode)
+ 		}
+ 	}
+ 	ret = weston_output_mode_set_native((struct weston_output *)ctx, &m, ((struct weston_output *)ctx)->current_scale);
+-	drm_output_refresh_force(((struct weston_output *)ctx)->compositor);
++	drm_output_refresh_force(ctx);
+ 
+ 	return ret;
+ }
+@@ -6399,7 +6401,9 @@ drm_output_enable(struct weston_output *base)
+ 	drm_output_print_modes(output);
+ 
+ #ifdef ENABLE_DRM_HELP
++	help_switch_compositor_output((output_ctx)base, true);
+ 	help_set_switch_mode_function((output_ctx)base, drm_output_switch_mode_helper);
++	help_set_force_refresh_function(drm_output_refresh_force);
+ #endif
+ 
+ 	return 0;
+@@ -6464,6 +6468,10 @@ drm_output_destroy(struct weston_output *base)
+ 		return;
+ 	}
+ 
++#ifdef ENABLE_DRM_HELP
++	help_updata_compositor_output((output_ctx)base, NULL);
++#endif
++
+ 	if (output->base.enabled)
+ 		drm_output_deinit(&output->base);
+ 
+@@ -6495,6 +6503,7 @@ drm_output_disable(struct weston_output *base)
+ 
+ 	weston_log("Disabling output %s\n", output->base.name);
+ #ifdef ENABLE_DRM_HELP
++	help_switch_compositor_output((output_ctx)base, false);
+ 	help_set_switch_mode_function(NULL, NULL);
+ #endif
+ 
+@@ -6771,6 +6780,11 @@ drm_output_create(struct weston_compositor *compositor, const char *name)
+ 	output->current_mode_need_restore = false;
+ 	weston_compositor_add_pending_output(&output->base, b->compositor);
+ 
++
++#ifdef ENABLE_DRM_HELP
++	help_updata_compositor_output(NULL, ((output_ctx)&(output->base)));
++#endif
++
+ 	return &output->base;
+ }
+ 
+-- 
+2.26.1
+

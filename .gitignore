@@ -1,0 +1,6 @@
+/buildroot/dl
+/output
+/image
+/*.diff
+/*.patch
+/TODO.txt

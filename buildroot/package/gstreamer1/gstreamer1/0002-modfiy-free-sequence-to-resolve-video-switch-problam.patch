@@ -1,0 +1,25 @@
+From 1096801ecd9c1c05407a9129b02884f357c035c0 Mon Sep 17 00:00:00 2001
+From: "yichen.li" <yichen.li@amlogic.com>
+Date: Wed, 22 Sep 2021 17:28:39 +0800
+Subject: [PATCH] modfiy-free-sequence-to-resolve-video-switch-problam
+
+---
+ gst/gstbufferpool.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gst/gstbufferpool.c b/gst/gstbufferpool.c
+index 619860e..2940e3d 100644
+--- a/gst/gstbufferpool.c
++++ b/gst/gstbufferpool.c
+@@ -531,7 +531,7 @@ gst_buffer_pool_set_active (GstBufferPool * pool, gboolean active)
+      * freed when they are released */
+     outstanding = g_atomic_int_get (&priv->outstanding);
+     GST_LOG_OBJECT (pool, "outstanding buffers %d", outstanding);
+-    if (outstanding == 0) {
++    if (outstanding >= 0) {
+       if (!do_stop (pool))
+         goto stop_failed;
+     }
+-- 
+2.32.0
+

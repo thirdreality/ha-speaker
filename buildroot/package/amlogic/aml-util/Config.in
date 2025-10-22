@@ -1,0 +1,40 @@
+config BR2_PACKAGE_AML_UTIL
+	bool "aml utilities"
+	depends on BR2_LINUX_KERNEL
+	select BR2_PACKAGE_LIBUSB
+	help
+	  utilities
+
+config BR2_INPUT_EVENTD_FILTER_POWERKEY
+	bool "input_eventd powerkey-filter"
+	depends on BR2_PACKAGE_AML_UTIL
+	default n
+	help
+	  input_eventd's powerkey-filter
+	  filter short continuous powerkey keystrokes
+
+config BR2_UTILS_IOCTL
+	bool "cmd_ioctl"
+	depends on BR2_PACKAGE_AML_UTIL
+	default n
+	help
+	  ioctl cmd
+config BR2_AML_UTIL_SIMULATE_KEY
+	bool "use the simulate_key in aml_util"
+	default y
+	help
+	  use the simulate_key in aml_util
+
+config BR2_UTILS_AUTO_SHUTDOWN
+	bool "Auto Shutdown"
+	depends on BR2_PACKAGE_AML_UTIL
+	default n
+	help
+	  Auto Shutdown
+
+config BR2_UTILS_BATTERY_MONITOR
+	bool "Battery Monitor"
+	depends on BR2_PACKAGE_AML_UTIL
+	default n
+	help
+	  Battery Monitor

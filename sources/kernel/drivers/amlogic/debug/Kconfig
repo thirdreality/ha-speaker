@@ -1,0 +1,44 @@
+menuconfig AMLOGIC_DEBUG
+	bool "AMLOGIC kernel debug"
+	default n
+	help
+		This option is set up for Amlogic kernel debug,
+		Modifying the source code, we will use the AMLOGIC_
+		prefix.If you want to add debug code to the kernel,please
+		use this option switch it.
+
+config AMLOGIC_DEBUG_LOCKUP
+	bool "Amlogic Kernel Lockup debug"
+	depends on AMLOGIC_DEBUG
+	depends on HARDLOCKUP_DETECTOR
+	default n
+	help
+		Debug lockup in isr and deaklock whit irq disabled.
+		When enable this config, Watchdog should be disabled.
+
+config AMLOGIC_DEBUG_ATRACE
+	bool "Amlogic Kernel ATrace"
+	depends on AMLOGIC_DEBUG
+	default y
+	help
+		Add android atrace compatible function.
+		Support Tags
+
+config AMLOGIC_DEBUG_FTRACE_PSTORE
+	bool "Amlogic ftrace pstore debug"
+	depends on AMLOGIC_DEBUG
+	depends on PSTORE_FTRACE
+	default y
+	help
+		Dump function call and register access to ramoops after watchdog
+		reboot.
+		Enable if doubt
+
+config AMLOGIC_DEBUG_SCRAMBLER_RAMOOPS
+	bool "Amlogic ddr scrambler keypreserve mode for pstore debug"
+	depends on AMLOGIC_DEBUG
+	depends on PSTORE
+	default n
+	help
+		Preserve ddr scrambler key to dump kernel console message and panic/oops
+		message.

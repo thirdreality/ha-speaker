@@ -1,0 +1,33 @@
+diff --git a/libsparse/sparse.c b/libsparse/sparse.c
+index d60c14b..8304e3b 100644
+--- a/libsparse/sparse.c
++++ b/libsparse/sparse.c
+@@ -27,6 +27,7 @@
+ #include "backed_block.h"
+ #include "sparse_defs.h"
+ #include "sparse_format.h"
++#include "progress.h"
+
+ struct sparse_file *sparse_file_new(unsigned int block_size, int64_t len)
+ {
+@@ -133,7 +134,7 @@ static int sparse_file_write_block(struct output_file *out,
+ static int write_all_blocks(struct sparse_file *s, struct output_file *out)
+ {
+ 	struct backed_block *bb;
+-	unsigned int last_block = 0;
++	unsigned int last_block = 0, percent = 0, prevpercent = 0;
+ 	int64_t pad;
+ 	int ret = 0;
+
+@@ -148,6 +149,11 @@ static int write_all_blocks(struct sparse_file *s, struct output_file *out)
+ 			return ret;
+ 		last_block = backed_block_block(bb) +
+ 				DIV_ROUND_UP(backed_block_len(bb), s->block_size);
++		percent = (unsigned)(100ULL * (last_block * s->block_size) / s->len);
++		if (percent != prevpercent) {
++			prevpercent = percent;
++			swupdate_progress_update(percent);
++		}
+ 	}
+
+ 	pad = s->len - (int64_t)last_block * s->block_size;

@@ -1,0 +1,8 @@
+# This is map table for buildroot, use this define the key map for buildroot system
+
+# type                  key
+Mute                    113
+Home                    102
+Volup                   115
+Voldown                 114
+Tap                     353

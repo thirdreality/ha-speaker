@@ -1,0 +1,5 @@
+config BR2_PACKAGE_BROADCOM
+	bool "broadcom"
+	depends on BR2_LINUX_KERNEL	
+	help
+	  broadcom wifi firmware

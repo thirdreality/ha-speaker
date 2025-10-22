@@ -1,0 +1,43 @@
+From 3214e679bd5de149f35e7e263badafb3162fe32b Mon Sep 17 00:00:00 2001
+From: Song Zhao <song.zhao@amlogic.com>
+Date: Fri, 23 Apr 2021 08:47:48 -0700
+Subject: [PATCH] videodecoder: prevent a crash
+
+---
+ gst-libs/gst/video/gstvideodecoder.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/gst-libs/gst/video/gstvideodecoder.c b/gst-libs/gst/video/gstvideodecoder.c
+index b49c4d1ba..cb5b5a068 100644
+--- a/gst-libs/gst/video/gstvideodecoder.c
++++ b/gst-libs/gst/video/gstvideodecoder.c
+@@ -3754,6 +3754,7 @@ gst_video_decoder_negotiate_pool (GstVideoDecoder * decoder, GstCaps * caps)
+   decoder->priv->allocator = allocator;
+   decoder->priv->params = params;
+ 
++  GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+   if (decoder->priv->pool) {
+     /* do not set the bufferpool to inactive here, it will be done
+      * on its finalize function. As videodecoder do late renegotiation
+@@ -3766,6 +3767,7 @@ gst_video_decoder_negotiate_pool (GstVideoDecoder * decoder, GstCaps * caps)
+     gst_object_unref (decoder->priv->pool);
+   }
+   decoder->priv->pool = pool;
++  GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+ 
+   /* and activate */
+   GST_DEBUG_OBJECT (decoder, "activate pool %" GST_PTR_FORMAT, pool);
+@@ -4055,6 +4057,10 @@ gst_video_decoder_allocate_output_frame_with_params (GstVideoDecoder *
+ 
+   GST_LOG_OBJECT (decoder, "alloc buffer size %d", num_bytes);
+ 
++  if (!decoder->priv->pool) {
++    g_warning ("null pool");
++    goto error;
++  }
+   flow_ret = gst_buffer_pool_acquire_buffer (decoder->priv->pool,
+       &frame->output_buffer, params);
+ 
+-- 
+2.25.1
+

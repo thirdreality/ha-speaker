@@ -1,0 +1,67 @@
+diff -Nur hostapd-2.9-Orig/src/crypto/random.c hostapd-2.9/src/crypto/random.c
+--- hostapd-2.9-Orig/src/crypto/random.c	2019-08-07 21:25:25.000000000 +0800
++++ hostapd-2.9/src/crypto/random.c	2020-01-21 09:26:05.036648055 +0800
+@@ -243,7 +243,7 @@
+ 	if (res < 0) {
+ 		if (errno == ENOSYS) {
+ 			wpa_printf(MSG_DEBUG,
+-				   "random: getrandom() not supported, falling back to /dev/random");
++				   "random: getrandom() not supported, falling back to /dev/urandom");
+ 		} else {
+ 			wpa_printf(MSG_INFO,
+ 				   "random: no data from getrandom(): %s",
+@@ -255,10 +255,10 @@
+ 	res = -1;
+ #endif /* CONFIG_GETRANDOM */
+ 	if (res < 0) {
+-		fd = open("/dev/random", O_RDONLY | O_NONBLOCK);
++		fd = open("/dev/urandom", O_RDONLY | O_NONBLOCK);
+ 		if (fd < 0) {
+ 			wpa_printf(MSG_ERROR,
+-				   "random: Cannot open /dev/random: %s",
++				   "random: Cannot open /dev/urandom: %s",
+ 				   strerror(errno));
+ 			return -1;
+ 		}
+@@ -267,7 +267,7 @@
+ 			   sizeof(dummy_key) - dummy_key_avail);
+ 		if (res < 0) {
+ 			wpa_printf(MSG_ERROR,
+-				   "random: Cannot read from /dev/random: %s",
++				   "random: Cannot read from /dev/urandom: %s",
+ 				   strerror(errno));
+ 			res = 0;
+ 		}
+@@ -339,12 +339,12 @@
+ 	res = read(sock, dummy_key + dummy_key_avail,
+ 		   sizeof(dummy_key) - dummy_key_avail);
+ 	if (res < 0) {
+-		wpa_printf(MSG_ERROR, "random: Cannot read from /dev/random: "
++		wpa_printf(MSG_ERROR, "random: Cannot read from /dev/urandom: "
+ 			   "%s", strerror(errno));
+ 		return;
+ 	}
+ 
+-	wpa_printf(MSG_DEBUG, "random: Got %u/%u bytes from /dev/random",
++	wpa_printf(MSG_DEBUG, "random: Got %u/%u bytes from /dev/urandom",
+ 		   (unsigned) res,
+ 		   (unsigned) (sizeof(dummy_key) - dummy_key_avail));
+ 	dummy_key_avail += res;
+@@ -451,14 +451,14 @@
+ 	}
+ #endif /* CONFIG_GETRANDOM */
+ 
+-	random_fd = open("/dev/random", O_RDONLY | O_NONBLOCK);
++	random_fd = open("/dev/urandom", O_RDONLY | O_NONBLOCK);
+ 	if (random_fd < 0) {
+-		wpa_printf(MSG_ERROR, "random: Cannot open /dev/random: %s",
++		wpa_printf(MSG_ERROR, "random: Cannot open /dev/urandom: %s",
+ 			   strerror(errno));
+ 		return;
+ 	}
+ 	wpa_printf(MSG_DEBUG, "random: Trying to read entropy from "
+-		   "/dev/random");
++		   "/dev/urandom");
+ 
+ 	eloop_register_read_sock(random_fd, random_read_fd, NULL, NULL);
+ #endif /* __linux__ */

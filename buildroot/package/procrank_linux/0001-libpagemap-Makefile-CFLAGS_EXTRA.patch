@@ -1,0 +1,13 @@
+diff --git a/libpagemap/Makefile b/libpagemap/Makefile
+index de8a9b9..f97ac47 100644
+--- a/libpagemap/Makefile
++++ b/libpagemap/Makefile
+@@ -27,7 +27,7 @@ LOCAL_OBJ_FILES := \
+ 
+ LOCAL_C_INCLUDES := $(LOCAL_PATH)/include
+ CC = $(CROSS_COMPILE)gcc
+-CFLAGS = -Wall -I$(LOCAL_C_INCLUDES) -c -D_LARGEFILE64_SOURCE
++CFLAGS = -Wall -I$(LOCAL_C_INCLUDES) -c -D_LARGEFILE64_SOURCE $(CFLAGS_EXTRA)
+ 
+ all: libpagemap.a
+ 

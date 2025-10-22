@@ -1,0 +1,154 @@
+From 902830418b0cfccb79b8a66dde951736bc9a087e Mon Sep 17 00:00:00 2001
+From: Ao Xu <ao.xu@amlogic.com>
+Date: Wed, 15 Apr 2020 12:21:59 +0800
+Subject: [PATCH] gistwaylandsink: use gstdrmallocator as the drm dma-buf
+ allocation
+
+Signed-off-by: Ao Xu <ao.xu@amlogic.com>
+---
+ ext/wayland/Makefile.am      |   3 +
+ ext/wayland/gstwaylandsink.c |  25 +++++-
+ ext/wayland/gstwaylandsink.h |   1 +
+ ext/wayland/meson.build      |   1 +
+ ext/wayland/wldisplay.c      |   1 +
+ ext/wayland/wldisplay.h      |   2 +
+ ext/wayland/wldrmallocator.c | 208 +++++++++++++++++++++++++++++++++++++++++++
+ ext/wayland/wldrmallocator.h |  77 ++++++++++++++++
+ ext/wayland/wlwindow.c       |  18 +++-
+ 9 files changed, 329 insertions(+), 7 deletions(-)
+ create mode 100644 ext/wayland/wldrmallocator.c
+ create mode 100644 ext/wayland/wldrmallocator.h
+
+Index: gst1-plugins-bad-1.16.2/ext/wayland/gstwaylandsink.c
+===================================================================
+--- gst1-plugins-bad-1.16.2.orig/ext/wayland/gstwaylandsink.c
++++ gst1-plugins-bad-1.16.2/ext/wayland/gstwaylandsink.c
+@@ -49,6 +49,7 @@
+ 
+ #include <gst/wayland/wayland.h>
+ #include <gst/video/videooverlay.h>
++#include <gst/gstdrmbufferpool.h>
+ 
+ /* signals */
+ enum
+@@ -62,7 +63,9 @@ enum
+ {
+   PROP_0,
+   PROP_DISPLAY,
+-  PROP_FULLSCREEN
++  PROP_FULLSCREEN,
++  PROP_ALLOCATION,
++  PROP_SECURE,
+ };
+ 
+ GST_DEBUG_CATEGORY (gstwayland_debug);
+@@ -208,6 +211,16 @@ gst_wayland_sink_class_init (GstWaylandS
+       g_param_spec_boolean ("fullscreen", "Fullscreen",
+           "Whether the surface should be made fullscreen ", FALSE,
+           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
++
++  g_object_class_install_property (gobject_class, PROP_ALLOCATION,
++      g_param_spec_boolean ("use-drm", "Wayland Allocation name", "Wayland "
++          "Use DRM based memory for allocation",
++          FALSE, G_PARAM_WRITABLE));
++
++  g_object_class_install_property (gobject_class, PROP_SECURE,
++      g_param_spec_boolean ("secure", "Wayland Allocation Secure", "Wayland "
++          "Use Secure DRM based memory for allocation",
++          FALSE, G_PARAM_WRITABLE));
+ }
+ 
+ static void
+@@ -269,6 +282,16 @@ gst_wayland_sink_set_property (GObject *
+       gst_wayland_sink_set_fullscreen (sink, g_value_get_boolean (value));
+       GST_OBJECT_UNLOCK (sink);
+       break;
++    case PROP_ALLOCATION:
++      GST_OBJECT_LOCK (sink);
++      sink->use_drm = g_value_get_boolean (value);
++      GST_OBJECT_UNLOCK (sink);
++      break;
++    case PROP_SECURE:
++      GST_OBJECT_LOCK (sink);
++      sink->secure = g_value_get_boolean (value);
++      GST_OBJECT_UNLOCK (sink);
++      break;
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+       break;
+@@ -604,18 +627,24 @@ gst_wayland_sink_propose_allocation (Gst
+   gst_query_parse_allocation (query, &caps, &need_pool);
+ 
+   if (need_pool)
+-    pool = gst_wayland_create_pool (sink, caps);
++    if (sink->use_drm)
++      pool = gst_drm_bufferpool_new (sink->secure, GST_DRM_BUFFERPOOL_TYPE_VIDEO_PLANE);
++    else
++      pool = gst_wayland_create_pool (sink, caps);
+ 
+   gst_query_add_allocation_pool (query, pool, sink->video_info.size, 2, 0);
+   if (pool)
+     g_object_unref (pool);
+ 
+-  alloc = gst_wl_shm_allocator_get ();
+-  gst_query_add_allocation_param (query, alloc, NULL);
++  if (!sink->use_drm) {
++    alloc = gst_wl_shm_allocator_get ();
++    gst_query_add_allocation_param (query, alloc, NULL);
++    g_object_unref (alloc);
++  }
+   gst_query_add_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
+-  g_object_unref (alloc);
+ 
+   return TRUE;
++
+ }
+ 
+ static void
+Index: gst1-plugins-bad-1.16.2/ext/wayland/gstwaylandsink.h
+===================================================================
+--- gst1-plugins-bad-1.16.2.orig/ext/wayland/gstwaylandsink.h
++++ gst1-plugins-bad-1.16.2/ext/wayland/gstwaylandsink.h
+@@ -64,6 +64,8 @@ struct _GstWaylandSink
+ 
+   gchar *display_name;
+ 
++  gboolean use_drm;
++  gboolean secure;
+   gboolean redraw_pending;
+   GMutex render_lock;
+   GstBuffer *last_buffer;
+Index: gst1-plugins-bad-1.16.2/ext/wayland/meson.build
+===================================================================
+--- gst1-plugins-bad-1.16.2.orig/ext/wayland/meson.build
++++ gst1-plugins-bad-1.16.2/ext/wayland/meson.build
+@@ -9,6 +9,7 @@ wl_sources = [
+ ]
+ 
+ libdrm_dep = dependency('libdrm', version: '>= 2.4.55', required:get_option('wayland'))
++gstdrmbufferpool_dep = dependency('gstdrmbufferpool')
+ 
+ if use_wayland
+     protocols_datadir = wl_protocol_dep.get_pkgconfig_variable('pkgdatadir')
+@@ -42,7 +43,7 @@ if use_wayland
+         c_args : gst_plugins_bad_args + ['-DGST_USE_UNSTABLE_API'],
+         include_directories : [configinc],
+         dependencies : [gst_dep, gstvideo_dep, gstwayland_dep, gstallocators_dep,
+-                        wl_client_dep, wl_protocol_dep, libdrm_dep],
++                        wl_client_dep, wl_protocol_dep, libdrm_dep, gstdrmbufferpool_dep],
+         install : true,
+         install_dir : plugins_install_dir,
+     )
+Index: gst1-plugins-bad-1.16.2/configure.ac
+===================================================================
+--- gst1-plugins-bad-1.16.2.orig/configure.ac
++++ gst1-plugins-bad-1.16.2/configure.ac
+@@ -1320,7 +1320,7 @@ dnl **** Wayland ****
+ translit(dnm, m, l) AM_CONDITIONAL(USE_WAYLAND, true)
+ AC_PATH_PROG([wayland_scanner], [wayland-scanner])
+ AG_GST_CHECK_FEATURE(WAYLAND, [wayland sink], wayland , [
+-  PKG_CHECK_MODULES(WAYLAND, wayland-client >= 1.11.0 libdrm >= 2.4.55 wayland-protocols >= 1.15, [
++  PKG_CHECK_MODULES(WAYLAND, wayland-client >= 1.11.0 libdrm >= 2.4.55 wayland-protocols >= 1.15, gstdrmbufferpool >= 1.0 [
+     if test "x$wayland_scanner" != "x"; then
+       HAVE_WAYLAND="yes"
+       AC_SUBST(WAYLAND_PROTOCOLS_DATADIR, `$PKG_CONFIG --variable=pkgdatadir wayland-protocols`)

@@ -1,0 +1,33 @@
+#! /bin/sh
+#
+# System-V init script for the openntp daemon
+#
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+DESC="network time protocol daemon"
+NAME=ntpd
+
+case "$1" in
+  start)
+	/etc/init.d/ntpdate.sh &
+	;;
+  stop) echo -n "Stopping $DESC: $NAME"
+	start-stop-daemon -K -q -n $NAME
+	echo "."
+	;;
+  reload|force-reload) echo -n "Reloading $DESC configuration..."
+	start-stop-daemon -K -q -n $NAME -s 1
+	echo "done."
+  ;;
+  netready|netup|netdown|netchange) ;;
+  restart) echo "Restarting $DESC: $NAME"
+	$0 stop
+	sleep 1
+	$0 start
+	;;
+  *) echo "Usage: $SCRIPTNAME {start|stop|restart|reload|force-reload}" >&2
+	exit 1
+	;;
+esac
+
+exit 0

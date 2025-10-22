@@ -1,0 +1,30 @@
+Amlogic Internal Clock Measurer
+===============================
+
+The Amlogic SoCs contains an IP to measure the internal clocks.
+The precision is multiple of MHz, useful to debug the clock states.
+
+Required properties:
+- compatible: Shall contain one of the following :
+			"amlogic,meson-gx-clk-measure" for GX SoCs
+			"amlogic,meson8-clk-measure" for Meson8 SoCs
+			"amlogic,meson8b-clk-measure" for Meson8b SoCs
+			"amlogic,meson-axg-clk-measure" for AXG SoCs
+			"amlogic,meson-g12a-clk-measure" for G12a SoCs
+			"amlogic,meson-sm1-clk-measure" for SM1 SoCs
+			"amlogic,meson-sc2-clk-measure" for SC2 SoCs
+			"amlogic,meson-tm2-clk-measure" for TM2 SoCs
+			"amlogic,meson-t5d-clk-measure" for T5D SoCs
+			"amlogic,meson-t7-clk-measure" for T7 SoCs
+			"amlogic,meson-s4-clk-measure" for S4 SoCs
+			"amlogic,meson-t3-clk-measure" for T3 SoCs
+			"amlogic,meson-p1-clk-measure" for P1 SoCs
+			"amlogic,meson-t5w-clk-measure" for T5W SoCs
+			"amlogic,meson-a5-clk-measure" for A5 SoCs
+- reg: base address and size of the Clock Measurer register space.
+
+Example:
+	clock-measure@8758 {
+		compatible = "amlogic,meson-gx-clk-measure";
+		reg = <0x0 0x8758 0x0 0x10>;
+	};

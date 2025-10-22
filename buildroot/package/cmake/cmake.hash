@@ -1,0 +1,6 @@
+# From https://cmake.org/files/v3.18/cmake-3.18.5-SHA-256.txt
+sha256 080bf24b0f73f4bf3ec368d2be1aa59369b9bb1cd693deeb6f18fe553ca74ab4  cmake-3.18.5.tar.gz
+
+# Locally calculated
+sha256 dc628fb936a5d229296d42083f9a8218aa32204c016919e784404c9ec58776e9  Copyright.txt
+

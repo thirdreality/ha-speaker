@@ -1,0 +1,9 @@
+config BR2_PACKAGE_H264BITSTREAM
+	bool "h264bitstream"
+	select BR2_PACKAGE_LIBICONV if !BR2_ENABLE_LOCALE
+	# runtime UTF conversion support
+	select BR2_TOOLCHAIN_GLIBC_GCONV_LIBS_COPY if BR2_TOOLCHAIN_USES_GLIBC
+	help
+	  h264bitstream is a self-contained library for manipulating h264 bit streams
+	  https://github.com/aizvorski/h264bitstream
+

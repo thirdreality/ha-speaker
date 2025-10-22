@@ -1,0 +1,16 @@
+diff --git a/libweston/weston-launch.c b/libweston/weston-launch.c
+index dff83cc..df4bdeb 100644
+--- a/libweston/weston-launch.c
++++ b/libweston/weston-launch.c
+@@ -376,7 +376,10 @@ err0:
+ 		wl->drm_fd = fd;
+ 	if (fd != -1 && major(s.st_rdev) == INPUT_MAJOR &&
+ 	    wl->last_input_fd < fd)
+-		wl->last_input_fd = fd;
++		{
++			//wl->last_input_fd = fd;
++			close(fd);
++		}
+ 
+ 	return 0;
+ }

@@ -1,0 +1,30 @@
+From a8bb6bbea4c7b91b6bc95f9294d51ee7fe581cc3 Mon Sep 17 00:00:00 2001
+From: Tim Yao <tim.yao@amlogic.com>
+Date: Tue, 29 Sep 2020 12:38:21 -0700
+Subject: [PATCH] [Patch] Force GRPC_POSIX version of accept4.
+
+---
+ src/core/lib/iomgr/port.h | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/lib/iomgr/port.h b/src/core/lib/iomgr/port.h
+index 63a0269..1a20748 100644
+--- a/src/core/lib/iomgr/port.h
++++ b/src/core/lib/iomgr/port.h
+@@ -87,9 +87,10 @@
+ #define GRPC_LINUX_EPOLL_CREATE1 1
+ #define GRPC_LINUX_EVENTFD 1
+ #endif
+-#if __GLIBC_PREREQ(2, 10)
+-#define GRPC_LINUX_SOCKETUTILS 1
+-#endif
++// force GRPC_POSIX version of accept4
++//#if __GLIBC_PREREQ(2, 10)
++//#define GRPC_LINUX_SOCKETUTILS 1
++//#endif
+ #endif
+ #ifdef LINUX_VERSION_CODE
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)
+-- 
+2.24.1
+

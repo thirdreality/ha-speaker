@@ -1,0 +1,17 @@
+config BR2_PACKAGE_AMLOGIC_BOOT_FIP
+         bool "amlogic-boot-fip"
+         help
+           This package enables access to various u-boot
+           blobs from the LibreELEC amlogic-boot-fip repository.
+
+           https://github.com/LibreELEC/amlogic-boot-fip
+
+if BR2_PACKAGE_AMLOGIC_BOOT_FIP
+
+config BR2_PACKAGE_AMLOGIC_BOOT_FIP_BOARD
+        string "Board uboot firmware config"
+        depends on BR2_PACKAGE_AMLOGIC_BOOT_FIP
+        help
+          Name of the board for which U-Boot firmware should be built 
+          from amlogic-boot-fip
+endif

@@ -1,0 +1,22 @@
+diff --git a/src/pcm/pcm.c b/src/pcm/pcm.c
+index 1064044..ee27514 100644
+--- a/src/pcm/pcm.c
++++ b/src/pcm/pcm.c
+@@ -3744,7 +3744,17 @@ int snd_pcm_hw_params_get_rate_numden(const snd_pcm_hw_params_t *params,
+ 				      unsigned int *rate_num, unsigned int *rate_den)
+ {
+ 	assert(params);
++	int i = 0;
++
+ 	if (CHECK_SANITY(params->rate_den == 0)) {
++		i = &params->intervals[SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL];
++		if (snd_interval_single(i)) {
++			*rate_num = snd_interval_value(i);
++			*rate_den = 1;
++			// printf("=====GTW rate_num = %d, rate_den = %d", rate_num, rate_den);
++			return 0;
++		}
++
+ 		SNDMSG("invalid rate_den value");
+ 		return -EINVAL;
+ 	}

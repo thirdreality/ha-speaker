@@ -1,0 +1,6 @@
+[submodule "sources/toolchain"]
+	path = sources/toolchain
+	url = https://github.com/thirdreality/buildroot-toolchain.git
+[submodule "sources/aml-commonlib"]
+	path = sources/aml-commonlib
+	url = https://github.com/khadas/vendor-aml-commonlib.git

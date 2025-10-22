@@ -1,0 +1,60 @@
+diff --git a/core/swupdate.c b/core/swupdate.c
+--- a/core/swupdate.c	2023-03-06 11:59:35.765452152 +0800
++++ b/core/swupdate.c	2023-03-06 12:06:10.935963739 +0800
+@@ -157,6 +157,7 @@
+ 		" -H, --hwrevision <board>:<rev> : Set hardware revision\n"
+ #endif
+ 		" -c, --check                    : check image and exit, use with -i <filename>\n"
++        " -G, --go-to-recovery           : go to the recovery mode\n"
+ 		" -h, --help                     : print this help and exit\n"
+ 		);
+ #ifdef CONFIG_DOWNLOAD
+@@ -595,6 +596,7 @@
+ 	int opt_i = 0;
+ 	int opt_e = 0;
+ 	int opt_c = 0;
++    int opt_G = 0;
+ 	char image_url[MAX_URL];
+ 	char main_options[256];
+ 	unsigned int public_key_mandatory = 0;
+@@ -650,6 +652,8 @@
+ 	strcat(main_options, "K:");
+ #endif
+ 
++    strcat(main_options, "G");
++
+ 	memset(fname, 0, sizeof(fname));
+ 
+ 	/* Initialize internal database */
+@@ -861,7 +865,10 @@
+ 			strncpy(swcfg.globals.preupdatecmd, optarg,
+ 				sizeof(swcfg.globals.preupdatecmd));
+ 			break;
+-		default:
++        case 'G':
++            opt_G = 1;
++            break;
++		diefault:
+ 			usage(argv[0]);
+ 			exit(EXIT_FAILURE);
+ 			break;
+@@ -906,6 +913,19 @@
+ 	}
+ #endif
+ 
++    if (opt_G) {
++#ifdef CONFIG_MTD
++        mtd_cleanup();
++        scan_mtd_devices();
++#endif
++ 
++        set_recovery();
++        system("reboot");
++        sleep(5);
++
++        exit(1);
++    }
++
+ 	swupdate_crypto_init();
+ 
+ 	if (strlen(swcfg.globals.publickeyfname)) {

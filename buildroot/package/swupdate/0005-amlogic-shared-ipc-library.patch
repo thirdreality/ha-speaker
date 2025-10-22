@@ -1,0 +1,278 @@
+diff --git a/Makefile b/Makefile
+index 1a14293..bd36fdb 100644
+--- a/Makefile
++++ b/Makefile
+@@ -4,6 +4,8 @@ SUBLEVEL = 0
+ EXTRAVERSION =
+ NAME =
+ 
++IPCLIB_VERSION = 0.1
++
+ # *DOCUMENTATION*
+ # To see a list of typical targets execute "make help"
+ # More info can be located in ./README
+@@ -202,6 +204,9 @@ CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
+ CFLAGS_KERNEL	=
+ AFLAGS_KERNEL	=
+ 
++BINDIR ?= /usr/bin
++LIBDIR ?= /usr/lib
++INCLUDEDIR ?= /usr/include
+ 
+ # Use LINUXINCLUDE when you must reference the include/ directory.
+ # Needed to be compatible with the O= option
+@@ -354,10 +359,16 @@ include $(srctree)/Makefile.flags
+ # Defaults to vmlinux, but the arch makefile usually adds further targets
+ 
+ objs-y		:= core handlers
+-libs-y		:= corelib ipc mongoose parser suricatta bootloader libsparse
+-shareds-y	:= bindings
++libs-y		:= corelib mongoose parser suricatta bootloader libsparse
++bindings-y	:= bindings
+ tools-y		:= tools
+ 
++ipc-y		:= ipc
++ipc-lib 	:= $(patsubst %,%/built-in.o, $(ipc-y))
++ipc-dirs 	:= $(ipc-y)
++
++swupdate-ipc-lib 	:= libswupdate.so.${IPCLIB_VERSION}
++
+ swupdate-dirs	:= $(objs-y) $(libs-y)
+ swupdate-objs	:= $(patsubst %,%/built-in.o, $(objs-y))
+ swupdate-libs	:= $(patsubst %,%/lib.a, $(libs-y))
+@@ -365,7 +376,7 @@ swupdate-all	:= $(swupdate-objs) $(swupdate-libs)
+ 
+ tools-dirs	:= $(tools-y)
+ tools-objs	:= $(patsubst %,%/built-in.o, $(tools-y))
+-tools-bins	:= $(patsubst $(tools-y)/%.c,$(tools-y)/%,$(wildcard $(tools-y)/*.c))
++tools-bins	:= $(patsubst $(srctree)/$(tools-y)/%.c,$(tools-y)/%,$(wildcard $(srctree)/$(tools-y)/*.c))
+ tools-bins-unstr:= $(patsubst %,%_unstripped,$(tools-bins))
+ tools-all	:= $(tools-objs)
+ 
+@@ -373,9 +384,9 @@ ifeq ($(HAVE_LUA),y)
+ lua_swupdate	:= lua_swupdate.so.0.1
+ endif
+ 
+-shared-dirs	:= $(shareds-y)
+-shared-libs	:= $(patsubst %,%/built-in.o, $(shareds-y))
+-shared-all	:= $(shared-libs)
++bindings-dirs	:= $(bindings-y)
++bindings-libs	:= $(patsubst %,%/built-in.o, $(bindings-y))
++bindings-all	:= $(bindings-libs)
+ 
+ PHONY += cfg-sanity-check
+ cfg-sanity-check:
+@@ -398,11 +409,11 @@ quiet_cmd_swupdate = LD      $@
+       "$(CC)" \
+       "$(KBUILD_CFLAGS) $(CFLAGS_swupdate)" \
+       "$(LDFLAGS) $(EXTRA_LDFLAGS) $(LDFLAGS_swupdate)" \
+-      "$(swupdate-objs)" \
++      "$(swupdate-objs) $(ipc-lib)" \
+       "$(swupdate-libs)" \
+-      "$(LDLIBS)"
++	  "$(LDLIBS)"
+ 
+-swupdate_unstripped: $(swupdate-all) FORCE
++swupdate_unstripped: ${swupdate-ipc-lib} $(swupdate-all) FORCE
+ 	$(call if_changed,swupdate)
+ 
+ quiet_cmd_addon = LD      $@
+@@ -410,10 +421,10 @@ quiet_cmd_addon = LD      $@
+       "$@" \
+       "$(CC)" \
+       "$(KBUILD_CFLAGS) $(CFLAGS_swupdate)" \
+-      "$(LDFLAGS) $(EXTRA_LDFLAGS) $(LDFLAGS_swupdate)" \
++      "$(LDFLAGS) $(EXTRA_LDFLAGS) $(LDFLAGS_swupdate) -L$(objtree)" \
+       "$(2)" \
+       "$(swupdate-libs)" \
+-      "$(LDLIBS)"
++	  "$(LDLIBS) :${swupdate-ipc-lib}"
+ 
+ quiet_cmd_shared = LD      $@
+       cmd_shared = $(srctree)/scripts/trylink \
+@@ -421,12 +432,16 @@ quiet_cmd_shared = LD      $@
+       "$(CC)" \
+       "-shared -Wl,-soname,$@" \
+       "$(KBUILD_CFLAGS) $(CFLAGS_swupdate)" \
+-      "$(LDFLAGS) $(EXTRA_LDFLAGS) $(LDFLAGS_swupdate)" \
+-      "$(shared-libs) ipc/lib.a" \
+-      "$(LDLIBS)"
++      "$(LDFLAGS) $(EXTRA_LDFLAGS) $(LDFLAGS_swupdate) -L$(objtree)" \
++      "$(2)" \
++	  "" \
++	  "$(LDLIBS)"
++
++lua_swupdate.so.0.1: $(bindings-libs) ${swupdate-ipc-lib} FORCE
++	$(call if_changed,shared,$(bindings-libs) $(ipc-lib))
+ 
+-lua_swupdate.so.0.1: $(shared-libs) ${swupdate-libs} FORCE
+-	$(call if_changed,shared)
++${swupdate-ipc-lib}: $(ipc-lib) FORCE
++	$(call if_changed,shared,$(ipc-lib))
+ 
+ ifeq ($(SKIP_STRIP),y)
+ quiet_cmd_strip = echo $@
+@@ -440,51 +455,46 @@ endif
+ swupdate: cfg-sanity-check swupdate_unstripped
+ 	$(call cmd,strip)
+ 
+-${tools-bins}: ${tools-objs} ${swupdate-libs} FORCE
++${tools-bins}: ${swupdate-ipc-lib} ${tools-objs} ${swupdate-libs} FORCE
+ 	$(call if_changed,addon,$@.o)
+ 	@mv $@ $@_unstripped
+ 	$(call cmd,strip)
+ 
+ install: all
+-	install -d ${DESTDIR}/usr/bin
+-	install -d ${DESTDIR}/usr/include
+-	install -d ${DESTDIR}/usr/lib
+-	install -m 755 swupdate ${DESTDIR}/usr/bin
++	install -d ${DESTDIR}/${BINDIR}
++	install -d ${DESTDIR}/${INCLUDEDIR}
++	install -d ${DESTDIR}/${LIBDIR}
++	install -m 755 swupdate ${DESTDIR}/${BINDIR}
+ 	for i in ${tools-bins};do \
+-		install -m 755 $$i ${DESTDIR}/usr/bin; \
++		install -m 755 $$i ${DESTDIR}/${BINDIR}; \
+ 	done
+-	install -m 0644 include/network_ipc.h ${DESTDIR}/usr/include
+-	install -m 0644 include/swupdate_status.h ${DESTDIR}/usr/include
+-	install -m 0644 include/progress_ipc.h ${DESTDIR}/usr/include
+-	install -m 0755 ipc/lib.a ${DESTDIR}/usr/lib/libswupdate.a
++	install -m 0644 $(srctree)/include/network_ipc.h ${DESTDIR}/${INCLUDEDIR}
++	install -m 0644 $(srctree)/include/swupdate_status.h ${DESTDIR}/${INCLUDEDIR}
++	install -m 0644 $(srctree)/include/progress_ipc.h ${DESTDIR}/${INCLUDEDIR}
++	install -m 0755 $(objtree)/${swupdate-ipc-lib} ${DESTDIR}/${LIBDIR}
++	ln -sr ${DESTDIR}/${LIBDIR}/${swupdate-ipc-lib} ${DESTDIR}/${LIBDIR}/libswupdate.so
+ 	if [ $(HAVE_LUA) = y ]; then \
+-		install -d ${DESTDIR}/usr/lib/lua/$(LUAVER); \
+-		install -m 0755 ${lua_swupdate} $(DESTDIR)/usr/lib/lua/$(LUAVER); \
++		install -d ${DESTDIR}/${LIBDIR}/lua/$(LUAVER); \
++		install -m 0755 ${lua_swupdate} $(DESTDIR)/${LIBDIR}/lua/$(LUAVER); \
+ 	fi
+ 
+-PHONY += run-tests
+-tests: \
+-	acceptance-tests \
+-	suricatta-tests \
+-	corelib-tests
++PHONY += tests
++tests: acceptance-tests
+ 
+ PHONY += acceptance-tests
+ acceptance-tests: FORCE
+ 	$(Q)$(MAKE) $(build)=scripts/acceptance-tests tests
+ 
+-PHONY += suricatta-tests
+-suricatta-tests: FORCE
+-	$(Q)$(MAKE) $(build)=suricatta/test SWOBJS="$(swupdate-objs)" SWLIBS="$(swupdate-libs)" LDLIBS="$(LDLIBS)" tests
+-
+ PHONY += test
+ test:
+-	$(Q)$(MAKE) $(build)=test SWOBJS="$(swupdate-objs)" SWLIBS="$(swupdate-libs)" LDLIBS="$(LDLIBS)" tests
++	$(Q)$(MAKE) $(build)=test SWOBJS="$(swupdate-objs)" SWLIBS="$(swupdate-libs) ${swupdate-ipc-lib}" LDLIBS="$(LDLIBS)" tests
+ 
+ # The actual objects are generated when descending,
+ # make sure no implicit rule kicks in
+ $(sort $(swupdate-all)): $(swupdate-dirs) ;
+ $(sort $(tools-all)): $(tools-dirs) ;
+-$(sort $(shared-all)): $(shared-dirs) ;
++$(sort $(bindings-all)): $(bindings-dirs) ;
++$(sort $(ipc-lib)): $(ipc-dirs) ;
+ 
+ # Handle descending into subdirectories listed in $(vmlinux-dirs)
+ # Preset locale variables to speed up the build process. Limit locale
+@@ -492,12 +502,14 @@ $(sort $(shared-all)): $(shared-dirs) ;
+ # make menuconfig etc.
+ # Error messages still appears in the original language
+ 
+-PHONY += $(swupdate-dirs) $(tools-dirs) $(shared-dirs)
++PHONY += $(swupdate-dirs) $(tools-dirs) $(bindings-dirs) $(ipc-dirs)
+ $(swupdate-dirs): scripts
+ 	$(Q)$(MAKE) $(build)=$@
+ $(tools-dirs): scripts
+ 	$(Q)$(MAKE) $(build)=$@
+-$(shared-dirs): scripts
++$(bindings-dirs): scripts
++	$(Q)$(MAKE) $(build)=$@
++$(ipc-dirs): scripts
+ 	$(Q)$(MAKE) $(build)=$@
+ 
+ ###
+@@ -509,7 +521,7 @@ $(shared-dirs): scripts
+ 
+ # Directories & files removed with 'make clean'
+ CLEAN_DIRS  +=
+-CLEAN_FILES += swupdate swupdate_unstripped* lua_swupdate* ${tools-bins} \
++CLEAN_FILES += swupdate swupdate_unstripped* lua_swupdate* libswupdate* ${tools-bins} \
+ 	$(patsubst %,%_unstripped,$(tools-bins)) \
+ 	$(patsubst %,%.out,$(tools-bins)) \
+ 	$(patsubst %,%.map,$(tools-bins)) \
+@@ -522,7 +534,7 @@ MRPROPER_FILES += .config .config.old tags TAGS cscope* GPATH GTAGS GRTAGS GSYMS
+ #
+ clean: rm-dirs  := $(CLEAN_DIRS)
+ clean: rm-files := $(CLEAN_FILES)
+-clean-dirs      := $(addprefix _clean_, $(swupdate-dirs) $(tools-dirs) $(shared-dirs) scripts/acceptance-tests)
++clean-dirs      := $(addprefix _clean_, $(swupdate-dirs) $(ipc-dirs) $(tools-dirs) $(bindings-dirs) scripts/acceptance-tests)
+ 
+ PHONY += $(clean-dirs) clean archclean
+ $(clean-dirs):
+@@ -536,7 +548,8 @@ clean: $(clean-dirs)
+ 		-o -name '.*.d' -o -name '.*.tmp' -o -name '*.mod.c' \
+ 		-o -name modules.builtin -o -name '.tmp_*.o.*' \
+ 		-o -name '*.gcno' \) -type f -print | xargs rm -f
+-	@$(MAKE) -C doc clean
++	@pwd
++	$(Q)$(MAKE) -f $(srctree)/doc/Makefile BUILDDIR=$(CURDIR)/doc/build clean
+ 
+ # mrproper - Delete all generated files, including .config
+ #
+@@ -583,17 +596,17 @@ clean := -f $(if $(KBUILD_SRC),$(srctree)/)scripts/Makefile.clean obj
+ endif #ifeq ($(config-targets),1)
+ endif #ifeq ($(mixed-targets),1)
+ 
+-endif	# skip-makefile
+-
+-PHONY += FORCE
+-FORCE:
+-
+ # Documentation
+ # run Makefile in doc directory
+ 
+ dirhtml singlehtml pickle json htmlhelp qthelp devhelp epub \
+ latex latexpdf text man changes linkcheck html doctest:
+-	@$(MAKE) -C doc $@
++	$(Q)$(MAKE) -C $(srctree)/doc BUILDDIR=$(CURDIR)/doc/build $@
++
++endif	# skip-makefile
++
++PHONY += FORCE
++FORCE:
+ 
+ # Declare the contents of the .PHONY variable as phony.  We keep that
+ # information in a variable so we can use it in if_changed and friends.
+diff --git a/ipc/Makefile b/ipc/Makefile
+index e2826bd..3ee16fb 100644
+--- a/ipc/Makefile
++++ b/ipc/Makefile
+@@ -1,6 +1,6 @@
+ # Copyright (C) 2014-2018 Stefano Babic <sbabic@denx.de>
+ #
+ # SPDX-License-Identifier:     GPL-2.0-or-later
+-lib-y			+= network_ipc.o progress_ipc.o
++obj-y			+= network_ipc.o progress_ipc.o
+ 
+ EXTRA_CFLAGS += -fPIC
+diff --git a/test/Makefile b/test/Makefile
+index 81f8cf7..145c0a0 100644
+--- a/test/Makefile
++++ b/test/Makefile
+@@ -45,7 +45,7 @@ quiet_cmd_linktestexe = LD      $(basename $@)
+ 						"$(SWLIBS)" \
+ 						"$(LDLIBS) cmocka"
+ 
+-EXECUTE_TEST = echo "RUN $(subst $(obj)/,,$(var))"; CMOCKA_MESSAGE_OUTPUT=TAP $(var)
++EXECUTE_TEST = echo "RUN $(subst $(obj)/,,$(var))"; LD_LIBRARY_PATH=$(objtree) CMOCKA_MESSAGE_OUTPUT=TAP $(var)
+ 
+ PHONY += default
+ default:

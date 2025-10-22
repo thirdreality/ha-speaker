@@ -1,0 +1,8 @@
+config BR2_PACKAGE_KMSCUBE
+	bool "mesa-kmscube"
+	depends on BR2_PACKAGE_LIBDRM
+	depends on BR2_PACKAGE_MESON_MALI
+	help
+          Example KMS/GBM/EGL application
+
+          https://gitlab.freedesktop.org/mesa/kmscube/

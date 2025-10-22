@@ -1,0 +1,115 @@
+From 93aa36de668a337b988b6b623dc5047a2de9ff4a Mon Sep 17 00:00:00 2001
+From: "jian.cai" <jian.cai@amlogic.com>
+Date: Fri, 28 Aug 2020 19:48:59 +0800
+Subject: [PATCH] fix crash
+
+---
+ core/notifier.c            | 3 ++-
+ core/swupdate.c            | 5 ++++-
+ corelib/network_thread.c   | 8 ++++++--
+ corelib/progress_thread.c  | 3 +++
+ corelib/stream_interface.c | 4 ++++
+ 5 files changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/core/notifier.c b/core/notifier.c
+index 8643c6f..6ec2200 100644
+--- a/core/notifier.c
++++ b/core/notifier.c
+@@ -101,8 +101,9 @@ void notify(RECOVERY_STATUS status, int error, int level, const char *msg)
+ 			notifymsg.status = status;
+ 			notifymsg.error = error;
+ 			notifymsg.level = level;
++			memset(notifymsg.buf, 0, sizeof(notifymsg.buf));
+ 			if (msg)
+-				strcpy(notifymsg.buf, msg);
++				strncpy(notifymsg.buf, msg, sizeof(notifymsg.buf) - 1);
+ 			else
+ 				notifymsg.buf[0] = '\0';
+ 			sendto(notifyfd, &notifymsg, sizeof(notifymsg), 0,
+diff --git a/core/swupdate.c b/core/swupdate.c
+index af3f193..d72dc6a 100644
+--- a/core/swupdate.c
++++ b/core/swupdate.c
+@@ -1032,8 +1032,11 @@ int main(int argc, char **argv)
+ 	 */
+ 	if (!opt_c) {
+ 		network_daemon = start_thread(network_initializer, &swcfg);
+-
++		usleep(300*1000);
+ 		start_thread(progress_bar_thread, NULL);
++		usleep(400*1000);
++
++		fprintf(stderr, "%s %d...\n", __func__, __LINE__);
+ 	}
+ 
+ 	if (opt_i) {
+diff --git a/corelib/network_thread.c b/corelib/network_thread.c
+index 0f4137e..1aa951b 100644
+--- a/corelib/network_thread.c
++++ b/corelib/network_thread.c
+@@ -219,6 +219,8 @@ void *network_thread (void *data)
+ 	SIMPLEQ_INIT(&notifymsgs);
+ 	register_notifier(network_notifier);
+ 
++	usleep(200*1000);
++
+ 	/* Initialize and bind to UDS */
+ 	ctrllisten = listener_create(get_ctrl_socket(), SOCK_STREAM);
+ 	if (ctrllisten < 0 ) {
+@@ -231,6 +233,8 @@ void *network_thread (void *data)
+ 			  get_ctrl_socket());
+ 	}
+ 
++	usleep(200*1000);
++
+ 	do {
+ 		clilen = sizeof(cliaddr);
+ 		if ( (ctrlconnfd = accept(ctrllisten, (struct sockaddr *) &cliaddr, &clilen)) < 0) {
+@@ -272,7 +276,7 @@ void *network_thread (void *data)
+ 				 *  forward the request without checking
+ 				 *  the payload
+ 				 */
+-			       
++
+ 				pipe = pctl_getfd_from_type(msg.data.instmsg.source);
+ 				if (pipe < 0) {
+ 					ERROR("Cannot find channel for requested process");
+@@ -412,5 +416,5 @@ void *network_thread (void *data)
+ 			close(ctrlconnfd);
+ 		pthread_mutex_unlock(&stream_mutex);
+ 	} while (1);
+-	return (void *)0; 
++	return (void *)0;
+ }
+diff --git a/corelib/progress_thread.c b/corelib/progress_thread.c
+index 4f29d6a..fecf25d 100644
+--- a/corelib/progress_thread.c
++++ b/corelib/progress_thread.c
+@@ -212,6 +212,9 @@ void *progress_bar_thread (void __attribute__ ((__unused__)) *data)
+ 			get_prog_socket());
+ 	}
+ 
++	usleep(200*1000);
++	fprintf(stderr, "%s %d...\n", __func__, __LINE__);
++
+ 	do {
+ 		clilen = sizeof(cliaddr);
+ 		if ( (connfd = accept(listen, (struct sockaddr *) &cliaddr, &clilen)) < 0) {
+diff --git a/corelib/stream_interface.c b/corelib/stream_interface.c
+index 20d3622..751c186 100644
+--- a/corelib/stream_interface.c
++++ b/corelib/stream_interface.c
+@@ -518,6 +518,10 @@ void *network_initializer(void *data)
+ 	/* fork off the local dialogs and network service */
+ 	network_thread_id = start_thread(network_thread, &inst);
+ 
++	usleep(200*1000);
++	fprintf(stderr, "%s %d...\n", __func__, __LINE__);
++
++
+ 	/* handle installation requests (from either source) */
+ 	while (1) {
+ 		ret = 0;
+-- 
+2.26.2
+

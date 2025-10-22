@@ -1,0 +1,154 @@
+From 0ad1a1e25acf545503a19d47400cd0f491fe7da2 Mon Sep 17 00:00:00 2001
+From: Dezhi Kong <dezhi.kong@amlogic.com>
+Date: Mon, 8 Jun 2020 19:56:33 +0800
+Subject: [PATCH] optimze hotplug pending process and avoid hotplug crash.
+
+---
+ libweston/compositor-drm.c | 54 +++++++++++++++++++++++++++++---------
+ 1 file changed, 41 insertions(+), 13 deletions(-)
+
+diff --git a/libweston/compositor-drm.c b/libweston/compositor-drm.c
+index a84f72f..e3254f2 100644
+--- a/libweston/compositor-drm.c
++++ b/libweston/compositor-drm.c
+@@ -603,6 +603,10 @@ static struct gl_renderer_interface *gl_renderer;
+ 
+ static const char default_seat[] = "seat0";
+ 
++#ifdef AML_OUTPUT_DYNAMIC_SWITCH
++static bool hpd_flage = false;
++#endif
++
+ static void
+ wl_array_remove_uint32(struct wl_array *array, uint32_t elm)
+ {
+@@ -1911,6 +1915,9 @@ drm_output_update_complete(struct drm_output *output, uint32_t flags,
+ 	struct drm_backend *b = to_drm_backend(output->base.compositor);
+ 	struct drm_plane_state *ps;
+ 	struct timespec ts;
++#ifdef AML_OUTPUT_DYNAMIC_SWITCH
++	struct weston_compositor *compositor = output->base.compositor;
++#endif
+ 
+ 	/* Stop the pageflip timer instead of rearming it here */
+ 	if (output->pageflip_timer)
+@@ -1922,32 +1929,23 @@ drm_output_update_complete(struct drm_output *output, uint32_t flags,
+ 	drm_output_state_free(output->state_last);
+ 	output->state_last = NULL;
+ 
+-	if (output->base.compositor->hpd_pending) {
+-	#ifdef AML_OUTPUT_DYNAMIC_SWITCH
+-		output->base.compositor->hpd_pending = 0;
+-		wl_signal_emit(&output->base.compositor->heads_changed_signal,
+-			       output->base.compositor);
+-		weston_log("%s: hpd_pending to 0\n", __func__);
+-	#endif
+-	}
+-
+ 	if (output->destroy_pending) {
+ 		output->destroy_pending = 0;
+ 		output->disable_pending = 0;
+ 		output->dpms_off_pending = 0;
+ 		drm_output_destroy(&output->base);
+-		return;
++		goto out;
+ 	} else if (output->disable_pending) {
+ 		output->disable_pending = 0;
+ 		output->dpms_off_pending = 0;
+ 		weston_output_disable(&output->base);
+-		return;
++		goto out;
+ 	} else if (output->dpms_off_pending) {
+ 		struct drm_pending_state *pending = drm_pending_state_alloc(b);
+ 		output->dpms_off_pending = 0;
+ 		drm_output_get_disable_state(pending, output);
+ 		drm_pending_state_apply_sync(pending);
+-		return;
++		goto out;
+ 	} else if (output->state_cur->dpms == WESTON_DPMS_OFF &&
+ 	           output->base.repaint_status != REPAINT_AWAITING_COMPLETION) {
+ 		/* DPMS can happen to us either in the middle of a repaint
+@@ -1955,7 +1953,7 @@ drm_output_update_complete(struct drm_output *output, uint32_t flags,
+ 		 * away for DPMS off), or at any other random point. If the
+ 		 * latter is true, then we cannot go through finish_frame,
+ 		 * because the repaint machinery does not expect this. */
+-		return;
++		goto out;
+ 	}
+ 
+ 	ts.tv_sec = sec;
+@@ -1966,6 +1964,17 @@ drm_output_update_complete(struct drm_output *output, uint32_t flags,
+ 	 * repaint needed flag is cleared just after that */
+ 	if (output->recorder)
+ 		weston_output_schedule_repaint(&output->base);
++
++out:
++
++#ifdef AML_OUTPUT_DYNAMIC_SWITCH
++	if (compositor->hpd_pending) {
++		hpd_flage = false;
++		compositor->hpd_pending = 0;
++		weston_log("%s: hpd_pending to 0\n", __func__);
++		wl_signal_emit(&compositor->heads_changed_signal, compositor);
++	}
++#endif
+ }
+ 
+ /**
+@@ -1981,6 +1990,10 @@ drm_output_assign_state(struct drm_output_state *state,
+ 	struct drm_output *output = state->output;
+ 	struct drm_backend *b = to_drm_backend(output->base.compositor);
+ 	struct drm_plane_state *plane_state;
++#ifdef AML_OUTPUT_DYNAMIC_SWITCH
++	struct weston_head *base;
++	struct drm_head *head;
++#endif
+ 
+ 	assert(!output->state_last);
+ 
+@@ -2024,6 +2037,12 @@ drm_output_assign_state(struct drm_output_state *state,
+ 		else if (plane->type == WDRM_PLANE_TYPE_PRIMARY)
+ 			output->page_flip_pending = 1;
+ 	}
++#ifdef AML_OUTPUT_DYNAMIC_SWITCH
++	if (hpd_flage == true) {
++		b->compositor->hpd_pending = 1;
++		hpd_flage = false;
++	}
++#endif
+ }
+ 
+ static struct drm_plane_state *
+@@ -6454,6 +6473,9 @@ drm_output_destroy(struct weston_output *base)
+ {
+ 	struct drm_output *output = to_drm_output(base);
+ 	struct drm_backend *b = to_drm_backend(base->compositor);
++#ifdef AML_OUTPUT_DYNAMIC_SWITCH
++	struct weston_compositor *compositor = base->compositor;
++#endif
+ 
+ 	assert(!output->virtual);
+ 
+@@ -6477,6 +6499,11 @@ drm_output_destroy(struct weston_output *base)
+ 	assert(!output->state_last);
+ 	drm_output_state_free(output->state_cur);
+ 
++#ifdef AML_OUTPUT_DYNAMIC_SWITCH
++	hpd_flage = false;
++	compositor->hpd_pending = 0;
++#endif
++
+ 	free(output);
+ }
+ 
+@@ -6902,6 +6929,7 @@ udev_drm_event(int fd, uint32_t mask, void *data)
+ 				weston_log("%s: hpd_pending to 1\n", __func__);
+ 			}
+ 		}
++		hpd_flage = true;
+ #endif
+ 		drm_backend_update_heads(b, event);
+ 	}
+-- 
+2.26.1
+

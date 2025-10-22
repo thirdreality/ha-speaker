@@ -1,0 +1,66 @@
+From 38c977ac7cde7dfc9d77fe6cf534b5b8b8676cb6 Mon Sep 17 00:00:00 2001
+From: "yichen.li" <yichen.li@amlogic.com>
+Date: Wed, 22 Sep 2021 17:17:13 +0800
+Subject: [PATCH] modfiy free sequence to resolve video switch problam
+
+---
+ sys/v4l2/gstv4l2bufferpool.c | 13 +++++++------
+ sys/v4l2/gstv4l2object.c     |  4 ++--
+ 2 files changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/sys/v4l2/gstv4l2bufferpool.c b/sys/v4l2/gstv4l2bufferpool.c
+index a493ccc..cb00324 100644
+--- a/sys/v4l2/gstv4l2bufferpool.c
++++ b/sys/v4l2/gstv4l2bufferpool.c
+@@ -981,12 +981,6 @@ gst_v4l2_buffer_pool_stop (GstBufferPool * bpool)
+     pool->group_released_handler = 0;
+   }
+ 
+-  if (pool->other_pool) {
+-    gst_buffer_pool_set_active (pool->other_pool, FALSE);
+-    gst_object_unref (pool->other_pool);
+-    pool->other_pool = NULL;
+-  }
+-
+   gst_v4l2_buffer_pool_streamoff (pool);
+ 
+   ret = GST_BUFFER_POOL_CLASS (parent_class)->stop (bpool);
+@@ -994,6 +988,13 @@ gst_v4l2_buffer_pool_stop (GstBufferPool * bpool)
+   if (ret)
+     ret = gst_v4l2_buffer_pool_vallocator_stop (pool);
+ 
++  GST_DEBUG_OBJECT (pool, "stopping other_pool");
++  if (pool->other_pool) {
++    gst_buffer_pool_set_active (pool->other_pool, FALSE);
++    gst_object_unref (pool->other_pool);
++    pool->other_pool = NULL;
++  }
++
+   return ret;
+ }
+ 
+diff --git a/sys/v4l2/gstv4l2object.c b/sys/v4l2/gstv4l2object.c
+index 706c5e4..a41d0bd 100644
+--- a/sys/v4l2/gstv4l2object.c
++++ b/sys/v4l2/gstv4l2object.c
+@@ -565,6 +565,8 @@ gst_v4l2_object_destroy (GstV4l2Object * v4l2object)
+     gst_structure_free (v4l2object->extra_controls);
+   }
+ 
++  gst_poll_free (v4l2object->poll);
++
+   g_free (v4l2object);
+ }
+ 
+@@ -4282,8 +4284,6 @@ gst_v4l2_object_stop (GstV4l2Object * v4l2object)
+     v4l2object->pool = NULL;
+   }
+ 
+-  gst_poll_free (v4l2object->poll);
+-
+   GST_V4L2_SET_INACTIVE (v4l2object);
+ 
+ done:
+-- 
+2.32.0
+

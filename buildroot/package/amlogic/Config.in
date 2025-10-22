@@ -1,0 +1,7 @@
+menu "amlogic"
+    source "package/amlogic/aml-util/Config.in"
+    source "package/amlogic/aml-ubootenv/Config.in"
+    source "package/amlogic/aml-uboot-customer/Config.in"
+    source "package/amlogic/aml-bootloader-message/Config.in"
+endmenu
+

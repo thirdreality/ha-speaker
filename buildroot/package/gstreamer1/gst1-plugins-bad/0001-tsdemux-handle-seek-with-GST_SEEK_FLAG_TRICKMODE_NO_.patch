@@ -1,0 +1,64 @@
+From 555440a6fb76a492c86e7f5e0a74d4981f2ea706 Mon Sep 17 00:00:00 2001
+From: Song Zhao <song.zhao@amlogic.com>
+Date: Thu, 12 Aug 2021 13:49:48 -0700
+Subject: [PATCH] tsdemux: handle seek with GST_SEEK_FLAG_TRICKMODE_NO_AUDIO
+
+---
+ gst/mpegtsdemux/mpegtsbase.c | 4 ++++
+ gst/mpegtsdemux/mpegtsbase.h | 3 +++
+ gst/mpegtsdemux/tsdemux.c    | 3 +++
+ 3 files changed, 10 insertions(+)
+
+diff --git a/gst/mpegtsdemux/mpegtsbase.c b/gst/mpegtsdemux/mpegtsbase.c
+index 1a68f86..ad75110 100644
+--- a/gst/mpegtsdemux/mpegtsbase.c
++++ b/gst/mpegtsdemux/mpegtsbase.c
+@@ -1756,6 +1756,10 @@ mpegts_base_handle_seek_event (MpegTSBase * base, GstPad * pad,
+     goto done;
+   }
+ 
++  if (flags & GST_SEEK_FLAG_TRICKMODE_NO_AUDIO)
++    base->no_audio_set = TRUE;
++  else
++    base->no_audio_set = FALSE;
+ 
+   /* If the subclass can seek, do that */
+   ret = klass->seek (base, event);
+diff --git a/gst/mpegtsdemux/mpegtsbase.h b/gst/mpegtsdemux/mpegtsbase.h
+index 5775cdd..632784f 100644
+--- a/gst/mpegtsdemux/mpegtsbase.h
++++ b/gst/mpegtsdemux/mpegtsbase.h
+@@ -161,6 +161,9 @@ struct _MpegTSBase {
+   /* Whether the parent bin is streams-aware, meaning we can
+    * add/remove streams at any point in time */
+   gboolean streams_aware;
++
++  /* save seek flag */
++  gboolean no_audio_set;
+ };
+ 
+ struct _MpegTSBaseClass {
+diff --git a/gst/mpegtsdemux/tsdemux.c b/gst/mpegtsdemux/tsdemux.c
+index 352f0ac..c1f30c9 100644
+--- a/gst/mpegtsdemux/tsdemux.c
++++ b/gst/mpegtsdemux/tsdemux.c
+@@ -2524,6 +2524,7 @@ calculate_and_push_newsegment (GstTSDemux * demux, TSDemuxStream * stream,
+       /* Start from the first ts/pts */
+       GstClockTime base =
+           demux->segment.base + demux->segment.position - demux->segment.start;
++      MpegTSBase *tsbase = (MpegTSBase *) demux;
+       gst_segment_init (&demux->segment, GST_FORMAT_TIME);
+       demux->segment.start = firstts;
+       demux->segment.stop = GST_CLOCK_TIME_NONE;
+@@ -2531,6 +2532,8 @@ calculate_and_push_newsegment (GstTSDemux * demux, TSDemuxStream * stream,
+       demux->segment.time = firstts;
+       demux->segment.rate = demux->rate;
+       demux->segment.base = base;
++      if (tsbase->no_audio_set)
++        demux->segment.flags |= GST_SEGMENT_FLAG_TRICKMODE_NO_AUDIO;
+     }
+   } else if (demux->segment.start < firstts) {
+     /* Take into account the offset to the first buffer timestamp */
+-- 
+2.24.1
+
