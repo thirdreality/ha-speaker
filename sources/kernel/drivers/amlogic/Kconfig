@@ -1,0 +1,182 @@
+config AMLOGIC_GKI
+	bool "Amlogic GKI macro"
+	default n
+	help
+		This macro controls GKI module build behavior, if enabled
+		some internal code will be build as external module
+
+config AMLOGIC_MODIFY
+	bool "Amlogic modify for kernel code"
+	default n
+	help
+		This option is set up for AMLOGIC modify of standard
+		kernel source code. All modify of kernel standard code
+		should be wrapped by this config
+
+config AMLOGIC_ANDROIDP
+	bool "Amlogic modify kernel in project androidp"
+	default n
+	help
+		This option is set up for AMLOGIC modify of standard
+		kernel source code in project androidp.
+
+config AMLOGIC_REMOVE_OLD
+	bool "Amlogic remove old soc code for g12a previous"
+	default n
+	help
+		This option is set up for removing code for G12A
+		previous.All modify of not used code should be
+		wrapped by this config
+
+config AMLOGIC_ARMV8_AARCH64
+	bool "AARCH64 kernel support for Amlogic ARMv8 Soc"
+	depends on AMLOGIC_MODIFY || COMPILE_TEST
+	default n
+	help
+	  aarch32 and aarch64 kernels are supported for armv8 socs.
+	  enable this config to select 64 bit kernel.
+	  Select Y if doult.
+
+config AMLOGIC_DRIVER
+	bool "Amlogic Peripheral drivers"
+	depends on AMLOGIC_MODIFY
+	default n
+	help
+		this option is provided for control amlogic
+		drivers, if you want to use amlogic driver
+		please open it.
+		Note: All amlogic driver should be placed in
+		this directory
+
+config AMLOGIC_ALLYESCONFIG
+	bool "Amlogic compile config option"
+	default n
+	help
+		This option is set up for masking frame size
+		limit in drivers/Makefile file. When we compile
+		kernel with --allyesconfig, we not limit the
+		frame size.
+
+config AMLOGIC_MEDIA_V4L_DEC
+	bool "enable amlogic v4l decode module."
+	default n
+	help
+		Support v4L protocol based decoding components.
+		Decoding is done by AmLogic hardware, and if you
+		need to support this feature, you need to enable
+		this configuration item.
+
+
+#
+# Amlogic DVB configuration
+#
+
+menu "Amlogic dvb configuration"
+
+config AMLOGIC_DVB
+	tristate "Amlogic dvb support"
+	depends on DVB_CORE && AMLOGIC_DVB_COMPAT
+	default n
+	help
+		This option is used only to control the
+		compilation of dvb related driver code, for
+		example hw_demux, it is enabled by default,
+		When it is turned on,it will automatically
+		select DVB_CORE and AMLOGIC_DVB_COMPAT.
+
+config AMLOGIC_DVB_COMPAT
+	tristate "Compat amlogic dvb"
+	depends on DVB_CORE
+	default n
+	help
+		This option is used only to compatible with
+		amlogic dvb related code, for example dvb-core,
+		it is enabled by default,depending on
+		AMLOGIC_DVB and DVB_CORE.
+
+config AMLOGIC_MFD
+	tristate "Compat amlogic mfd"
+	default n
+	help
+		This option is used only to compatible with
+		amlogic dvb related code,it is enabled by
+		default,depending on
+		AMLOGIC_MFD.
+
+config AMLOGIC_REGULATOR
+	tristate "Compat amlogic mfd"
+	default n
+	help
+		This option is used only to compatible with
+		amlogic mfd related code,it is enabled
+		by default,depending on
+		AMLOGIC_REGULATOR.
+
+endmenu
+
+if AMLOGIC_DRIVER
+menu "Amlogic Device Drivers"
+# Please add folders in alphabetical order
+
+source "drivers/amlogic/algorithm/Kconfig"
+source "drivers/amlogic/cpufreq/Kconfig"
+source "drivers/amlogic/efuse_unifykey/Kconfig"
+source "drivers/amlogic/ddr_tool/Kconfig"
+source "drivers/amlogic/crypto/Kconfig"
+source "drivers/amlogic/secmon/Kconfig"
+source "drivers/amlogic/mailbox/Kconfig"
+source "drivers/amlogic/reg_access/Kconfig"
+source "drivers/amlogic/media/Kconfig"
+source "drivers/amlogic/pci/Kconfig"
+source "drivers/amlogic/thermal/Kconfig"
+source "drivers/amlogic/clk_debug/Kconfig"
+source "drivers/amlogic/input/Kconfig"
+source "drivers/amlogic/tee/Kconfig"
+source "drivers/amlogic/jtag/Kconfig"
+source "drivers/amlogic/reboot/Kconfig"
+source "drivers/amlogic/gki_tool/Kconfig"
+source "drivers/amlogic/hifi4dsp/Kconfig"
+source "drivers/amlogic/dvb/Kconfig"
+source "drivers/amlogic/drm/Kconfig"
+source "drivers/amlogic/irblaster/Kconfig"
+
+source "drivers/amlogic/cpuidle/Kconfig"
+source "drivers/amlogic/defendkey/Kconfig"
+source "drivers/amlogic/free_reserved/Kconfig"
+source "drivers/amlogic/usb/Kconfig"
+source "drivers/amlogic/pm/Kconfig"
+source "drivers/amlogic/power/Kconfig"
+source "drivers/amlogic/debug/Kconfig"
+source "drivers/amlogic/memory_ext/Kconfig"
+source "drivers/amlogic/bluetooth/Kconfig"
+source "drivers/amlogic/wifi/Kconfig"
+source "drivers/amlogic/uart/Kconfig"
+source "drivers/amlogic/smartcard_sc2/Kconfig"
+source "drivers/amlogic/mtd/Kconfig"
+source "drivers/amlogic/led/Kconfig"
+source "drivers/amlogic/ledring/Kconfig"
+source "drivers/amlogic/amaudio/Kconfig"
+source "drivers/amlogic/audiodsp/Kconfig"
+source "drivers/amlogic/audioinfo/Kconfig"
+source "drivers/amlogic/dolby_fw/Kconfig"
+source "drivers/amlogic/cpu_info/Kconfig"
+source "drivers/amlogic/ethernet/phy/Kconfig"
+source "drivers/amlogic/soc_info/Kconfig"
+source "drivers/amlogic/gator-driver/Kconfig"
+source "drivers/amlogic/global_timer/Kconfig"
+source "drivers/amlogic/mfd/Kconfig"
+source "drivers/amlogic/regulator/Kconfig"
+source "drivers/amlogic/mfh/Kconfig"
+source "drivers/amlogic/i2c_slave/Kconfig"
+source "drivers/amlogic/aml_hwspinlock/Kconfig"
+source "drivers/amlogic/rtc/Kconfig"
+source "drivers/amlogic/iio/Kconfig"
+source "drivers/amlogic/asr/Kconfig"
+source "drivers/amlogic/mkl/Kconfig"
+source "drivers/amlogic/freertos/Kconfig"
+
+source "drivers/amlogic/aes_hwkey_gcm/Kconfig"
+source "drivers/amlogic/gpio/Kconfig"
+
+endmenu
+endif

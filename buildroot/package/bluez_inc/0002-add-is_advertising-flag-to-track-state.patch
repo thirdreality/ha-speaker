@@ -1,0 +1,83 @@
+diff --git a/binc/adapter.c b/binc/adapter.c
+index 28f9e37..1223914 100644
+--- a/binc/adapter.c
++++ b/binc/adapter.c
+@@ -1079,6 +1079,7 @@ static void binc_internal_start_advertising_cb(__attribute__((unused)) GObject *
+         g_clear_error(&error);
+     } else {
+         log_debug(TAG, "started advertising (%s)", adapter->address);
++        adapter->advertisement->is_advertising = 1;
+     }
+ }
+ 
+diff --git a/binc/advertisement.c b/binc/advertisement.c
+index d7f4d5f..26ba041 100644
+--- a/binc/advertisement.c
++++ b/binc/advertisement.c
+@@ -28,22 +28,6 @@
+ 
+ static const char *const TAG = "Advertisement";
+ 
+-struct binc_advertisement {
+-    char *path; // Owned
+-    char *local_name; // Owned
+-    GPtrArray *services; // Owned
+-    GHashTable *manufacturer_data; // Owned
+-    GHashTable *service_data; // Owned
+-    guint registration_id;
+-    guint32 min_interval;
+-    guint32 max_interval;
+-    guint16 appearance;
+-    gboolean general_discoverable;
+-    gint16 tx_power;
+-    GPtrArray *includes; // owned
+-    SecondaryChannel secondary_channel;
+-};
+-
+ static char *secondary_channel_str[] = {
+     "1M",
+     "2M",
+@@ -219,6 +203,7 @@ void binc_advertisement_unregister(Advertisement *advertisement, const Adapter *
+     if (!result) {
+         log_debug(TAG, "failed to unregister advertisement");
+     }
++    advertisement->is_advertising = 0;
+ }
+ 
+ static void byte_array_free(GByteArray *byteArray) { g_byte_array_free(byteArray, TRUE); }
+@@ -237,6 +222,7 @@ Advertisement *binc_advertisement_create(void) {
+     advertisement->tx_power = 4;
+     advertisement->includes = NULL;
+     advertisement->secondary_channel = BINC_SC_1M;
++    advertisement->is_advertising = 0;
+     g_free(random_str);
+     return advertisement;
+ }
+diff --git a/binc/advertisement.h b/binc/advertisement.h
+index 8042357..9481916 100644
+--- a/binc/advertisement.h
++++ b/binc/advertisement.h
+@@ -37,6 +37,23 @@ typedef enum {
+     BINC_SC_CODED
+ } SecondaryChannel;
+ 
++struct binc_advertisement {
++    char *path; // Owned
++    char *local_name; // Owned
++    GPtrArray *services; // Owned
++    GHashTable *manufacturer_data; // Owned
++    GHashTable *service_data; // Owned
++    guint registration_id;
++    guint32 min_interval;
++    guint32 max_interval;
++    guint16 appearance;
++    gboolean general_discoverable;
++    gint16 tx_power;
++    GPtrArray *includes; // owned
++    SecondaryChannel secondary_channel;
++    gboolean is_advertising;
++};
++
+ Advertisement *binc_advertisement_create(void);
+ 
+ void binc_advertisement_free(Advertisement *advertisement);

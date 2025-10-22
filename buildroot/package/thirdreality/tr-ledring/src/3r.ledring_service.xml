@@ -1,0 +1,12 @@
+<node>
+  <interface name="com._3reality.EventBus">
+    <method name="FactoryReset">
+      <arg direction="out" type="s" name="result"/>
+    </method>
+
+    <signal name="LedShow">
+      <arg type="b" name="to_idle"/>
+      <arg type="as" name="animations"/>
+    </signal>
+  </interface>
+</node>

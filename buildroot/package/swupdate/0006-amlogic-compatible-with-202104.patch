@@ -1,0 +1,12 @@
+diff --git a/include/progress_ipc.h b/include/progress_ipc.h
+index 2c242eb..5ee3356 100644
+--- a/include/progress_ipc.h
++++ b/include/progress_ipc.h
+@@ -15,6 +15,7 @@
+ extern "C" {
+ #endif
+ 
++#define PRINFOSIZE	2048
+ 
+ extern char* SOCKET_PROGRESS_PATH;
+ 

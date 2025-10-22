@@ -1,0 +1,37 @@
+#!/bin/sh
+
+if [ -f config.status ]; then
+	make maintainer-clean
+fi
+
+./bootstrap && \
+    ./configure --enable-maintainer-mode \
+		--enable-debug \
+		--prefix=/usr \
+		--mandir=/usr/share/man \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--enable-tools \
+		--enable-manpages \
+		--enable-backtrace \
+		--enable-testing \
+		--enable-experimental \
+		--enable-deprecated \
+		--enable-nfc \
+		--enable-sap \
+		--enable-health \
+		--enable-android \
+		--enable-sixaxis \
+		--enable-hid2hci \
+		--enable-midi \
+		--enable-mesh \
+		--enable-btpclient \
+		--enable-logger \
+		--enable-pie \
+		--enable-asan \
+		--enable-lsan \
+		--enable-ubsan \
+		--enable-cups \
+		--enable-library \
+		--enable-admin \
+		--disable-datafiles $*

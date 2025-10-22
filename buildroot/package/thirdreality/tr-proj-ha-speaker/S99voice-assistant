@@ -1,0 +1,50 @@
+#!/bin/sh
+
+PIDDIR=/var/run/wyoming
+MIC_PIDFILE=$PIDDIR/mic.pid
+SND_PIDFILE=$PIDDIR/snd.pid
+WAKEWORD_PIDFILE=$PIDDIR/wakeword.pid
+# LED_PIDFILE=$PIDDIR/led.pid
+
+start() {
+    mkdir -p $PIDDIR
+
+    python3 -m wyoming_mic_external \
+        --program 'arecord -r 16000 -c 2 -f S16_LE -t raw' \
+        --rate 16000 --width 2 --channels 2 \
+        --uri 'tcp://0.0.0.0:10600' &
+    echo $! > $MIC_PIDFILE
+
+    python3 -m wyoming_snd_external \
+        --program 'aplay -D softvol -r 48000 -c 2 -f S16_LE -t raw' \
+        --rate 48000 --width 2 --channels 2 \
+        --uri 'tcp://0.0.0.0:10601' &
+    echo $! > $SND_PIDFILE
+
+    python3 -m wyoming_openwakeword \
+        --uri 'tcp://0.0.0.0:10400' &
+    echo $! > $WAKEWORD_PIDFILE
+
+    # python3 /usr/share/thirdreality/script/ledring.py &
+    # echo $! > $LED_PIDFILE
+}
+
+stop() {
+    [ -f $MIC_PIDFILE ] && kill "$(cat $MIC_PIDFILE)" 2>/dev/null && rm -f $MIC_PIDFILE
+    [ -f $SND_PIDFILE ] && kill "$(cat $SND_PIDFILE)" 2>/dev/null && rm -f $SND_PIDFILE
+    [ -f $WAKEWORD_PIDFILE ] && kill "$(cat $WAKEWORD_PIDFILE)" 2>/dev/null && rm -f $WAKEWORD_PIDFILE
+    # [ -f $LED_PIDFILE ] && kill "$(cat $LED_PIDFILE)" 2>/dev/null && rm -f $LED_PIDFILE
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+case "$1" in
+    netup) start ;;
+    netdown) stop ;;
+    restart) restart ;;
+    *) echo "Usage: $0 {netup|netdown|restart}" ;;
+esac

@@ -1,0 +1,19 @@
+diff -uNr swupdate-2019.11/handlers/flash_handler.c swupdate-2019.11/handlers/flash_handler.c
+--- swupdate-2019.11/handlers/flash_handler.c	2023-08-04 11:33:14.605801600 +0800
++++ swupdate-2019.12/handlers/flash_handler.c	2023-08-04 11:38:00.097419135 +0800
+@@ -384,13 +384,13 @@
+ 		return -1;
+ 	}
+ 
+-    if (strcmp(img->fname, "u-boot.bin.usb.bl2")==0) {
++    if (strstr(img->fname, "usb.bl2")) {
+        if(flash_erase_offset_size(mtdnum, img->seek, BL2_SIZE)) {
+            ERROR("I cannot erasing %s",
+                img->device);
+            return -1;
+        }
+-    } else if (strcmp(img->fname, "u-boot.bin.usb.tpl")==0) {
++    } else if (strstr(img->fname, "usb.tpl")) {
+        if(flash_erase_offset_size(mtdnum, img->seek, TPL_SIZE)) {
+            ERROR("I cannot erasing %s",
+                img->device);

@@ -1,0 +1,265 @@
+#!/bin/sh
+
+DEVICE_INFO="/usr/share/thirdreality/conf/device_info.json"
+DEVICE_INFO_TMP="/tmp/tmp.json"
+
+switch_wifi=0
+
+clean_config()
+{
+    local current_ssid=$(wpa_cli -i wlan0 status | awk -F= '/^ssid=/ {print $2}')
+    local current_id=$(wpa_cli -i wlan0 list_networks | grep '\[CURRENT\]' | awk '{print $1}')
+    
+    # 如果没有找到当前网络，不执行清理
+    # if [ -z "$current_id" ]; then
+    #     echo "Warning: No current network found, skipping cleanup"
+    #     return 0
+    # fi
+    
+    echo "Cleaning networks (keeping ID $current_id: $current_ssid)"
+    
+    wpa_cli -i wlan0 list_networks | tail -n +2 | awk '{print $1}' | while read -r id; do
+        [ -n "$id" ] && [ "$id" != "$current_id" ] && {
+            echo "Removing network $id"
+            wpa_cli -i wlan0 remove_network "$id" > /dev/null
+        }
+    done
+
+    wpa_cli -i wlan0 save_config > /dev/null
+}
+
+wifi_connect()
+{
+    local ssid="$1"
+    local psk="$2"
+
+    echo "Connecting to SSID: $ssid"
+
+    id=$(wpa_cli -i wlan0 add_network)
+    wpa_cli -i wlan0 set_network "$id" ssid "\"$ssid\""
+
+    if [ "$psk" = "" ]; then
+        wpa_cli -i wlan0 set_network "$id" key_mgmt NONE
+    else
+        wpa_cli -i wlan0 set_network "$id" psk "\"$psk\""
+    fi
+
+    wpa_cli -i wlan0 enable_network "$id"
+    wpa_cli -i wlan0 save_config
+    wpa_cli -i wlan0 select_network "$id"
+}
+
+wifi_disconnect()
+{
+    local ssid=$(wpa_cli -i wlan0 status | grep -E '^ssid=' | awk -F "=" '{print $2}')
+    local network_id=$(wpa_cli -i wlan0 list_networks | grep -w "$ssid" | awk '{print $1}')
+
+    echo "Disconnect ${ssid}"
+    echo "$network_id" > /tmp/old_wifi_id
+    echo "$ssid" > /tmp/old_wifi_ssid
+
+    wpa_cli -i wlan0 disconnect
+    /etc/init.d/S41dhcpcd restart
+}
+
+wifi_reconnect()
+{
+    echo "Attempting to reconnect to previous WiFi..."
+    
+    local old_id=""
+    local old_ssid=""
+    
+    if [ -f /tmp/old_wifi_id ]; then
+        old_id=$(cat /tmp/old_wifi_id)
+        old_ssid=$(cat /tmp/old_wifi_ssid 2>/dev/null)
+    fi
+    
+    if [ -z "$old_id" ]; then
+        echo "ERROR: No previous network ID found"
+        return 1
+    fi
+    
+    echo "Reconnecting to previous network: $old_ssid (ID: $old_id)"
+    
+    if ! wpa_cli -i wlan0 list_networks | tail -n +2 | awk '{print $1}' | grep -q "^${old_id}$"; then
+        echo "ERROR: Previous network configuration (ID: $old_id) not found"
+        rm -f /tmp/old_wifi_id /tmp/old_wifi_ssid
+        return 1
+    fi
+
+    wpa_cli -i wlan0 enable_network "$old_id" > /dev/null
+    wpa_cli -i wlan0 select_network "$old_id" > /dev/null
+    wpa_cli -i wlan0 save_config > /dev/null
+
+    local cnt=0
+    local connected=0
+    
+    while [ $cnt -lt 10 ]; do
+        echo "Reconnecting... ($((cnt + 1))/10)"
+        rc=$(wpa_cli -i wlan0 status | grep 'wpa_state=' | cut -d'=' -f2)
+        
+        if [ "$rc" = "COMPLETED" ]; then
+            connected=1
+            echo "Successfully reconnected to: $old_ssid"
+            break
+        fi
+        
+        cnt=$((cnt + 1))
+        sleep 1
+    done
+    
+    rm -f /tmp/old_wifi_id /tmp/old_wifi_ssid
+    
+    if [ $connected -eq 1 ]; then
+        wifi_connect_success
+    else
+        echo "ERROR: Failed to reconnect to previous WiFi"
+        clean_config
+        return 1
+    fi
+}
+
+wifi_connect_success()
+{
+    local ssid=$(wpa_cli status | awk -F= '/^ssid/ {print $2}')
+    local ip=""
+    local max_retries=10
+    local retry_count=0
+
+    while [ $retry_count -lt $max_retries ]; do
+        ip=$(ip -4 addr show wlan0 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d'/' -f1 | head -1)
+
+        if [ -n "$ip" ]; then
+            case "$ip" in
+                169.254.*)
+                    echo "Link-local address: $ip, waiting for DHCP... ($((retry_count + 1))/$max_retries)"
+                    ;;
+                127.0.0.1)
+                    echo "Loopback address detected, waiting... ($((retry_count + 1))/$max_retries)"
+                    ;;
+                *)
+                    echo "Valid IP address obtained: $ip"
+                    break
+                    ;;
+            esac
+        else
+            echo "No IP address yet, waiting... ($((retry_count + 1))/$max_retries)"
+        fi
+
+        retry_count=$((retry_count + 1))
+        sleep 1
+    done
+
+    if [ -z "$ip" ]; then
+        echo "ERROR: Failed to obtain IP address after $max_retries attempts"
+        clean_config
+        sync
+        exit 12
+    fi
+
+    case "$ip" in
+        169.254.*)
+            echo "ERROR: Only link-local address available: $ip"
+            clean_config
+            sync
+            exit 12
+            ;;
+        127.0.0.1)
+            echo "ERROR: Invalid loopback address"
+            clean_config
+            sync
+            exit 12
+            ;;
+    esac
+
+    echo "Connection successful - SSID: $ssid, IP: $ip"
+
+    (
+        flock -x 200
+        jq '.network += {
+            "ssid": "'"$ssid"'",
+            "ip": "'"$ip"'",
+            "status": "connected"
+        }' "$DEVICE_INFO" > "$DEVICE_INFO_TMP" && mv "$DEVICE_INFO_TMP" "$DEVICE_INFO"
+    ) 200>/tmp/device_info.lock
+
+    clean_config
+    sync
+    exit 0
+}
+
+wifi_connect_failed()
+{
+    if [ $switch_wifi -eq 1 ]; then
+        switch_wifi=0
+        wifi_reconnect
+        sync
+        exit 14
+    else
+        clean_config
+        sync
+        exit 13
+    fi
+}
+
+wifi()
+{
+    local ssid=$1
+    local psk=$2
+    local connected=0
+
+    wpa_cli scan > /dev/null
+    sleep 2
+    wpa_cli scan_results | grep -q "$ssid" || {
+        echo "SSID not found: $ssid"
+        sync
+        exit 10
+    }
+
+    wpa_cli -i wlan0 status | grep -iq completed
+    if [ $? -eq 0 ]; then
+        switch_wifi=1
+        wifi_disconnect
+        sleep 1
+    fi
+
+    wifi_connect "$ssid" "$psk"
+
+    local cnt=0
+    while [ $cnt -lt 10 ]
+    do
+        echo "Connecting to ${ssid}..."
+        rc=$(wpa_cli status | grep 'wpa_state=' | cut -d'=' -f2)
+        echo "Status: $rc"
+        if [ $rc = "COMPLETED" ]; then
+            connected=1
+            echo "Connect ${ssid} successfully!"
+            break
+        fi
+        let cnt++
+        sleep 1
+    done
+
+    if [ $connected -eq 1 ]; then
+        wifi_connect_success
+    else
+        wifi_connect_failed
+    fi
+}
+
+case "$1" in
+    connect)
+        wifi "$2" "$3"
+        ;;
+    *)
+        echo "Usage: $0 {connect ssid psk}"
+        exit 1
+esac
+
+# return codes:
+# 0 - success
+# 10 - ssid not found, only supports 2.4G wifi
+# 11 - wpa cli command failed to execute
+# 12 - failed to get valid ip address
+# 13 - failed to connect to the ssid
+# 14 - failed to switch wifi

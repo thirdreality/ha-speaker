@@ -1,0 +1,10 @@
+--- a/system/core/adb/adb.c	2024-04-17 05:53:10.864912662 +0000
++++ b/system/core/adb/adb.c	2024-04-17 05:52:38.071757459 +0000
+@@ -1266,6 +1266,7 @@
+ }
+
+ static int should_drop_privileges() {
++    return 0;
+ #ifndef ALLOW_ADBD_ROOT
+     return 1;
+ #else /* ALLOW_ADBD_ROOT */

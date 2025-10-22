@@ -1,0 +1,16 @@
+
+menu "Amlogic Crypto Support"
+
+config AMLOGIC_CRYPTO_DMA
+	tristate "amlogic HW CRYPTO module based on DMA"
+	depends on CRYPTO_ALGAPI
+	depends on CRYPTO_BLKCIPHER
+	depends on CRYPTO_HASH
+	default n
+	help
+		New Crypto DMA engine starting from S905-X
+		Current supported Socs are S905-X, S905-D, S912
+		Drivers using new dma engine are in file name
+		such aml-xxx-dma.c
+
+endmenu

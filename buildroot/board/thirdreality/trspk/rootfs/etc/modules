@@ -1,0 +1,12 @@
+dwc3
+dwc_otg
+# media modules
+media_clock
+firmware
+video_framerate_adapter
+decoder_common
+stream_input
+
+#OPTEE
+optee
+optee_armtz

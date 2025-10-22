@@ -1,0 +1,4 @@
+# locally computed
+sha256  fbd859d0457a414dc82244745fa110a5d4cf998a4a8c95f835477a89fca61ccc  android-tools_5.1.1.r38.orig.tar.xz
+sha256  ac45a1ed9003bf23a2fddde7b48efdb46fca910c1228f3f3c265de25b9305aa7  android-tools_5.1.1.r38-1.1.debian.tar.xz
+sha256  170c5939bf8c8eed1db8f66f2d6155e8c1a3e799e390b55e7aad253195b1ebf5  debian/copyright

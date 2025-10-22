@@ -1,0 +1,113 @@
+#!/bin/sh
+
+SYSTEM_STATUS="/usr/share/thirdreality/conf/device_info.json"
+SYSTEM_STATUS_TMP="/tmp/tmp.json"
+CHECK_INTERVAL_CONNECTIVITY=5
+CHECK_INTERVAL_SSID=3
+
+update_net_state()
+{
+    local new_state="$1"
+    (
+        flock -x 200
+        jq ".network.state = \"$new_state\"" "$SYSTEM_STATUS" > "$SYSTEM_STATUS_TMP" && mv "$SYSTEM_STATUS_TMP" "$SYSTEM_STATUS"
+        sync
+    ) 200>/var/lock/statusfile.lock
+}
+
+netUpAction()
+{
+    CHECK_INTERVAL_CONNECTIVITY=60
+    netState="connected"
+
+    echo "++++++++++++network connected++++++++++++++"
+    rm -f /tmp/net_disconnected
+
+    update_net_state "connected"
+}
+
+netDownAction()
+{
+    CHECK_INTERVAL_CONNECTIVITY=30
+
+    echo "++++++++++++network disconnected++++++++++++"
+    touch /tmp/net_disconnected
+
+    if ssidCheck; then
+        # ssidCheck success
+        netState="connected_no_internet"
+        update_net_state "connected_no_internet"
+    else
+        # ssidCheck failed
+        netState="disconnected"
+        update_net_state "disconnected"
+    fi
+
+    # Sometimes, this can resolve issues with temporary network connectivity loss
+    if ! grep -q "nameserver 8.8.8.8" /etc/resolv.conf; then
+        echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+    fi
+}
+
+ssidCheck()
+{
+    # 0: connected, 1: disconnected
+    if iw dev wlan0 link | grep -q "Not connected"; then
+        return 1
+    else
+        return 0
+    fi
+}
+
+connectivityCheck()
+{
+    # 0: success, 1: failed
+    if curl -Is --max-time 3 http://connectivitycheck.gstatic.com/generate_204 2>/dev/null | head -n 1 | grep -q "204"; then
+        return 0
+    elif curl -Is --max-time 3 http://captive.apple.com/hotspot-detect.html 2>/dev/null | head -n 1 | grep -q "200"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+netCheckState()
+{
+    netState="disconnected"
+
+    while true
+    do
+        if ssidCheck; then
+            # ssidCheck success
+            :
+        else
+            # ssiCheck failed
+            if [ "$netState" = "connected" ] || [ "$netState" = "connected_no_internet" ]; then
+                netDownAction
+                netState="disconnected"
+            fi
+
+            sleep "$CHECK_INTERVAL_SSID"
+            continue
+        fi
+
+        if connectivityCheck; then
+            # connectivityCheck success
+            if [ "$netState" = "disconnected" ] || [ "$netState" = "connected_no_internet" ]; then
+                netUpAction
+            fi
+        else
+            # connectivityCheck failed
+            if [ "$netState" = "connected" ]; then
+                netDownAction
+            elif [ "$netState" = "disconnected" ]; then
+                netState="connected_no_internet"
+                update_net_state "connected_no_internet"
+            fi
+        fi
+
+        sleep "$CHECK_INTERVAL_CONNECTIVITY"
+    done
+}
+
+netCheckState

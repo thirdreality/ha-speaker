@@ -1,0 +1,110 @@
+From 933e3353adf05729326d3d0eb860f44e269b0451 Mon Sep 17 00:00:00 2001
+From: "shu.wang" <shu.wang@amlogic.com>
+Date: Wed, 13 Mar 2024 03:19:39 +0000
+Subject: [PATCH] Subject: [PATCH] add ro permission control interfaces for
+ emmc boot0/boot1.
+
+---
+ handlers/raw_handler.c | 70 ++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 70 insertions(+)
+
+diff --git a/handlers/raw_handler.c b/handlers/raw_handler.c
+index 39c0c37..05bad47 100644
+--- a/handlers/raw_handler.c
++++ b/handlers/raw_handler.c
+@@ -150,6 +150,72 @@ static int getBootloaderOffset(int* bootloaderOffset)
+   return 0;
+ }
+ 
++static bool disable_emmc_boot_ro(char * boot)
++{
++  char file[256] = {0};
++  char val = 0;
++  FILE *fdout = NULL;
++
++  if (boot == NULL)
++    return false;
++
++  sprintf(file, "/sys/block/%s/force_ro", boot);
++  if (!access(file, F_OK)) {
++    //open
++    fdout = fopen(file, "w+");
++    if (fdout == NULL) {
++      TRACE("open %s failed!\n", file);
++      return false;
++    }
++
++    /* Read the value before modification */
++    val = fgetc(fdout);
++    if (val != EOF) {
++      TRACE("read %s partition RO is %c\n", boot, val);
++      if (val == '0') {
++        fclose(fdout);
++        return false;
++      }
++    }
++
++    /* Disable the boot partition RO */
++    TRACE("Disable %s partition RO \n", boot);
++    fseek(fdout, 0, SEEK_SET);
++    fprintf(fdout, "0");
++    fclose(fdout);
++    return true;
++  } else {
++    return false;
++  }
++}
++
++static void enable_emmc_boot_ro(char * boot)
++{
++  char file[256] = {0};
++  char val = 0;
++  FILE *fdout = NULL;
++
++  if (boot == NULL)
++    return;
++
++  sprintf(file, "/sys/block/%s/force_ro", boot);
++  if (!access(file, F_OK)) {
++    //open
++    fdout = fopen(file, "w+");
++    if (fdout == NULL) {
++      TRACE("open %s failed!\n", file);
++      return;
++    }
++
++    /* Enable the boot partition RO */
++    TRACE("Enable %s partition RO \n", boot);
++    fseek(fdout, 0, SEEK_SET);
++    fprintf(fdout, "1");
++    fclose(fdout);
++  }
++}
++
++
+ static int install_bootloader(struct img_type *img) {
+   int ret = 0;
+   int fdout = 0;
+@@ -164,8 +230,10 @@ static int install_bootloader(struct img_type *img) {
+ 	sprintf(emmcPartitionPath, "/dev/%s", sEmmcPartitionName[i]);
+ 
+ 	if (!access(emmcPartitionPath, F_OK)) {
++	  bool ro_flag = false;
+ 	  printf("write %s to %s.\n", img->fname, emmcPartitionPath);
+ 	  //open
++	  ro_flag = disable_emmc_boot_ro(sEmmcPartitionName[i]);
+ 	  fdout = open(emmcPartitionPath, O_RDWR);
+ 	  if (fdout < 0) {
+ 		TRACE("open %s failed!\n", emmcPartitionPath);
+@@ -181,6 +249,8 @@ static int install_bootloader(struct img_type *img) {
+ 
+ 	  ret = copyimage(&fdout, img, NULL);
+ 	  close(fdout);
++	  if (ro_flag)
++		enable_emmc_boot_ro(sEmmcPartitionName[i]);
+ 	  if (ret != 0) {
+ 		TRACE("install %s failed!\n", "/dev/bootloader");
+ 		return -1;
+-- 
+2.43.0
+

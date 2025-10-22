@@ -1,0 +1,17 @@
+config AMLOGIC_MESON_CPUFREQ
+	tristate  "MESON based CPUfreq driver"
+	default n
+        help
+          This adds the CPUfreq driver support for ARM big.LITTLE platforms
+          using MESON dt for CPU power management.
+
+          This driver uses meson cpufreq driver to interact with the
+          firmware providing the CPU DVFS functionality.
+
+config AMLOGIC_SCPI_CPUFREQ
+	tristate "scpi based cpufreq driver"
+	default n
+	help
+	  this is scpi cpufreq driver for old chips of amlogic
+
+	  this driver use mailbox communicate with uboot to do dvfs

@@ -1,0 +1,13 @@
+{
+    "device": {
+        "modelID": "3RAB01090D",
+        "firmwareVersion": "00.00.00",
+        "macAddress": "FF:FF:FF:FF:FF:FF",
+        "name": "3RSPK-DEFAULT"
+    },
+    "network": {
+        "status": "disconnected",
+        "ssid": "",
+        "ip": ""
+    },
+}

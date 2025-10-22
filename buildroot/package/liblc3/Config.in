@@ -1,0 +1,6 @@
+config BR2_PACKAGE_LIBLC3
+	bool "liblc3"
+	help
+	  This option enables the Android liblc3 library for Bluetooth LE Audio.
+
+	  https://github.com/google/liblc3

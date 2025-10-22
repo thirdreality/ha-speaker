@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include/lc3
+
+Name: LC3
+Description: LC3 LE Audio
+Version: @VERSION@
+Libs: -L${libdir} -llc3
+Cflags: -I${includedir}

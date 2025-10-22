@@ -1,0 +1,5 @@
+config BR2_PACKAGE_TR_PROJ_HA_SPEAKER
+    bool "thirdreality ha speaker project"
+    default n
+    help
+        enable thirdreality ha speaker project

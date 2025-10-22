@@ -1,0 +1,8 @@
+config BR2_PACKAGE_BLUEZ_INC
+	bool
+	select BR2_PACKAGE_LIBGLIB2
+	help
+	  provide a clean C interface to Bluez, without needing to use DBus commands.
+
+	  https://github.com/weliem/bluez_inc
+

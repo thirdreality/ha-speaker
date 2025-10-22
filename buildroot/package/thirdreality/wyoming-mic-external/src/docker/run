@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+args=()
+while [ -n "$1" ]; do
+    if [ "$1" == '--device' ]; then
+        shift
+        device="$1";
+    else
+        args+=("$1")
+    fi
+
+    shift
+done
+
+if [ -z "${device}" ]; then
+    echo "--device <NAME> is required. Run 'arecord -L' for a list (prefer plughw: devices)."
+    exit 1
+fi
+
+/app/script/run \
+    --uri tcp://0.0.0.0:10600 \
+    --program "arecord -D ${device} -r 16000 -c 1 -f S16_LE -t raw" \
+    --rate 16000  \
+    --width 2 \
+    --channels 1 "${args[@]}"

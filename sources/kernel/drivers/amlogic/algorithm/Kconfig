@@ -1,0 +1,25 @@
+#
+# Amlogic multimedia algorithm configuration
+#
+
+menu "Amlogic multimedia algorithm configuration"
+
+config AMLOGIC_MEDIA_ALGORITHM
+	tristate "Amlgoic Multimedia Algorithm Support"
+	default m
+	help
+		Amlogic multimedia algorithm include:
+		dnlp
+		hdr10
+		sl_hdr
+		ldim
+		frc
+
+if AMLOGIC_MEDIA_ALGORITHM
+#source "drivers/amlogic/algorithm/ldim/Kconfig"
+#source "drivers/amlogic/algorithm/dnlp/Kconfig"
+#source "drivers/amlogic/algorithm/common/Kconfig"
+#source "drivers/amlogic/algorithm/frc/Kconfig"
+endif
+
+endmenu

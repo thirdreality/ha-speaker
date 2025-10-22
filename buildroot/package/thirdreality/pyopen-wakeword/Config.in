@@ -1,0 +1,6 @@
+config BR2_PACKAGE_PYOPEN_WAKEWORD
+	bool "pyopen-wakeword"
+    depends on BR2_PACKAGE_PYTHON_WYOMING
+    default n
+	help
+        https://github.com/rhasspy/pyopen-wakeword

@@ -1,0 +1,11 @@
+--- swupdate-2019.11/handlers/raw_handler.c	2023-11-02 09:13:19.455191072 +0000
++++ swupdate-2019.11-2/handlers/raw_handler.c	2023-11-02 09:08:52.034031612 +0000
+@@ -283,7 +283,7 @@
+ 	int slot = 0;
+ 	char device_name[128];
+ 	// bootloader maybe need to seek 512 byte
+-	if ((strcmp(img->fname, "u-boot.bin")==0) ||(strcmp(img->fname, "u-boot.bin.encrypt")==0)) {
++	if (strstr(img->fname, "u-boot.bin") != NULL) {
+ 		return install_bootloader(img);
+ 	}
+ 

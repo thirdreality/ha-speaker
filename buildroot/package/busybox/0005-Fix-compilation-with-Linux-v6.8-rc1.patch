@@ -1,0 +1,68 @@
+From f91c4ce9fa16da425f18c295460fa125ffde3019 Mon Sep 17 00:00:00 2001
+From: "shu.wang" <shu.wang@amlogic.com>
+Date: Thu, 13 Mar 2025 07:54:29 +0000
+Subject: [PATCH] Fix compilation with Linux v6.8-rc1
+
+Linux v6.8-rc1 removed the definitions related to CBQ:
+https://github.com/torvalds/linux/commit/33241dca486264193ed68167c8eeae1fb197f3df
+making tc fail to build.
+Add some #ifdefs to handle this missing support.
+
+Upstream: http://lists.busybox.net/pipermail/busybox/2024-March/090678.html
+Bug report: https://bugs.busybox.net/show_bug.cgi?id=15931
+---
+ networking/tc.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/networking/tc.c b/networking/tc.c
+index 5106844..63c8a9e 100644
+--- a/networking/tc.c
++++ b/networking/tc.c
+@@ -233,6 +233,13 @@ static int cbq_parse_opt(int argc, char **argv, struct nlmsghdr *n)
+ 	return 0;
+ }
+ #endif
++
++#ifndef TCA_CBQ_MAX
++/*
++ * Linux v6.8-rc1~131^2~60^2^2 removed the uapi definitions for CBQ.
++ * See https://git.kernel.org/linus/33241dca48626
++ */
++#else
+ static int cbq_print_opt(struct rtattr *opt)
+ {
+ 	struct rtattr *tb[TCA_CBQ_MAX+1];
+@@ -324,6 +331,7 @@ static int cbq_print_opt(struct rtattr *opt)
+  done:
+ 	return 0;
+ }
++#endif
+ 
+ static FAST_FUNC int print_qdisc(
+ 		const struct sockaddr_nl *who UNUSED_PARAM,
+@@ -374,8 +382,10 @@ static FAST_FUNC int print_qdisc(
+ 		int qqq = index_in_strings(_q_, name);
+ 		if (qqq == 0) { /* pfifo_fast aka prio */
+ 			prio_print_opt(tb[TCA_OPTIONS]);
++#ifdef TCA_CBQ_MAX
+ 		} else if (qqq == 1) { /* class based queuing */
+ 			cbq_print_opt(tb[TCA_OPTIONS]);
++#endif
+ 		} else
+ 			bb_error_msg("unknown %s", name);
+ 	}
+@@ -442,9 +452,11 @@ static FAST_FUNC int print_class(
+ 		int qqq = index_in_strings(_q_, name);
+ 		if (qqq == 0) { /* pfifo_fast aka prio */
+ 			/* nothing. */ /*prio_print_opt(tb[TCA_OPTIONS]);*/
++#ifdef TCA_CBQ_MAX
+ 		} else if (qqq == 1) { /* class based queuing */
+ 			/* cbq_print_copt() is identical to cbq_print_opt(). */
+ 			cbq_print_opt(tb[TCA_OPTIONS]);
++#endif
+ 		} else
+ 			bb_error_msg("unknown %s", name);
+ 	}
+-- 
+2.47.1
+

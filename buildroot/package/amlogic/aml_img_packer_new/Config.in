@@ -1,0 +1,8 @@
+config BR2_USE_GPT_PARTITION
+	bool "Use GPT partition"
+	help
+        Use GPT partition
+config BR2_AML_STORAGE_SIZE
+	string "Storage size for makegpt cmd"
+	help
+        Storage size for makegpt cmd

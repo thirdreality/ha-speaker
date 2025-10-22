@@ -1,0 +1,157 @@
+From 4223bdea657c2539e36084cfcc7fea554fad9080 Mon Sep 17 00:00:00 2001
+From: Christian Stewart <christian@paral.in>
+Date: Mon, 11 Jul 2022 06:04:33 -0700
+Subject: [PATCH] Remove dependency on libbsd
+
+Signed-off-by: Christian Stewart <christian@paral.in>
+---
+ .../include/arch/linux-arm/AndroidConfig.h    |  2 +-
+ .../include/arch/linux-arm64/AndroidConfig.h  |  2 +-
+ .../include/arch/linux-mips/AndroidConfig.h   |  2 +-
+ .../include/arch/linux-mips64/AndroidConfig.h |  2 +-
+ .../fix-implicit-declaration-function.patch   | 26 +------------
+ system/core/fs_mgr/fs_mgr_fstab.c             | 38 +++++++++++++++++++
+ 6 files changed, 43 insertions(+), 29 deletions(-)
+
+diff --git a/build/core/combo/include/arch/linux-arm/AndroidConfig.h b/build/core/combo/include/arch/linux-arm/AndroidConfig.h
+index c06c8bc..b55df9e 100644
+--- a/build/core/combo/include/arch/linux-arm/AndroidConfig.h
++++ b/build/core/combo/include/arch/linux-arm/AndroidConfig.h
+@@ -273,7 +273,7 @@
+ /*
+  * Define if the strlcpy() function exists on the system.
+  */
+-#define HAVE_STRLCPY 1
++#define HAVE_STRLCPY 0
+ 
+ /*
+  * Define if the open_memstream() function exists on the system.
+diff --git a/build/core/combo/include/arch/linux-arm64/AndroidConfig.h b/build/core/combo/include/arch/linux-arm64/AndroidConfig.h
+index bcbda8f..afc1d1c 100644
+--- a/build/core/combo/include/arch/linux-arm64/AndroidConfig.h
++++ b/build/core/combo/include/arch/linux-arm64/AndroidConfig.h
+@@ -275,7 +275,7 @@
+ /*
+  * Define if the strlcpy() function exists on the system.
+  */
+-#define HAVE_STRLCPY 1
++#define HAVE_STRLCPY 0
+ 
+ /*
+  * Define if the open_memstream() function exists on the system.
+diff --git a/build/core/combo/include/arch/linux-mips/AndroidConfig.h b/build/core/combo/include/arch/linux-mips/AndroidConfig.h
+index bb3dc95..a1227fe 100644
+--- a/build/core/combo/include/arch/linux-mips/AndroidConfig.h
++++ b/build/core/combo/include/arch/linux-mips/AndroidConfig.h
+@@ -290,7 +290,7 @@
+ /*
+  * Define if the strlcpy() function exists on the system.
+  */
+-#define HAVE_STRLCPY 1
++#define HAVE_STRLCPY 0
+ 
+ /*
+  * Define if the open_memstream() function exists on the system.
+diff --git a/build/core/combo/include/arch/linux-mips64/AndroidConfig.h b/build/core/combo/include/arch/linux-mips64/AndroidConfig.h
+index 7ded3ce..56e5c6d 100644
+--- a/build/core/combo/include/arch/linux-mips64/AndroidConfig.h
++++ b/build/core/combo/include/arch/linux-mips64/AndroidConfig.h
+@@ -287,7 +287,7 @@
+ /*
+  * Define if the strlcpy() function exists on the system.
+  */
+-#define HAVE_STRLCPY 1
++#define HAVE_STRLCPY 0
+ 
+ /*
+  * Define if the open_memstream() function exists on the system.
+diff --git a/debian/patches/fix-implicit-declaration-function.patch b/debian/patches/fix-implicit-declaration-function.patch
+index d6e03c0..1d6caa6 100644
+--- a/debian/patches/fix-implicit-declaration-function.patch
++++ b/debian/patches/fix-implicit-declaration-function.patch
+@@ -3,32 +3,8 @@ Author: Fathi Boudra <fabo@debian.org>
+ 
+ ---
+  system/core/adb/adb.c                |    1 +
+- system/core/fs_mgr/fs_mgr_fstab.c    |    2 +-
+- system/core/include/cutils/sockets.h |    2 +-
+- 3 files changed, 3 insertions(+), 2 deletions(-)
++ 1 files changed, 1 insertions(+), 0 deletions(-)
+ 
+---- a/system/core/fs_mgr/fs_mgr_fstab.c
+-+++ b/system/core/fs_mgr/fs_mgr_fstab.c
+-@@ -17,7 +17,7 @@
+- #include <ctype.h>
+- #include <stdio.h>
+- #include <stdlib.h>
+--#include <string.h>
+-+#include <bsd/string.h>
+- #include <sys/mount.h>
+- 
+- #include "fs_mgr_priv.h"
+---- a/system/core/include/cutils/sockets.h
+-+++ b/system/core/include/cutils/sockets.h
+-@@ -19,7 +19,7 @@
+- 
+- #include <errno.h>
+- #include <stdlib.h>
+--#include <string.h>
+-+#include <bsd/string.h>
+- #include <stdbool.h>
+- 
+- #ifdef HAVE_WINSOCK
+ --- a/system/core/adb/adb.c
+ +++ b/system/core/adb/adb.c
+ @@ -41,6 +41,7 @@
+diff --git a/system/core/fs_mgr/fs_mgr_fstab.c b/system/core/fs_mgr/fs_mgr_fstab.c
+index 9ddb464..b133db6 100644
+--- a/system/core/fs_mgr/fs_mgr_fstab.c
++++ b/system/core/fs_mgr/fs_mgr_fstab.c
+@@ -73,6 +73,44 @@ static struct flag_list fs_mgr_flags[] = {
+     { 0,             0 },
+ };
+ 
++/*
++ * Appends src to string dst of size siz (unlike strncat, siz is the
++ * full size of dst, not space left).  At most siz-1 characters
++ * will be copied.  Always NUL terminates (unless siz <= strlen(dst)).
++ * Returns strlen(src) + MIN(siz, strlen(initial dst)).
++ * If retval >= siz, truncation occurred.
++ */
++size_t
++strlcat(dst, src, siz)
++	char *dst;
++	const char *src;
++	size_t siz;
++{
++	char *d = dst;
++	const char *s = src;
++	size_t n = siz;
++	size_t dlen;
++
++	/* Find the end of dst and adjust bytes left but don't go past end */
++	while (n-- != 0 && *d != '\0')
++		d++;
++	dlen = d - dst;
++	n = siz - dlen;
++
++	if (n == 0)
++		return(dlen + strlen(s));
++	while (*s != '\0') {
++		if (n != 1) {
++			*d++ = *s;
++			n--;
++		}
++		s++;
++	}
++	*d = '\0';
++
++	return(dlen + (s - src));	/* count does not include NUL */
++}
++
+ static int parse_flags(char *flags, struct flag_list *fl,
+                        struct fs_mgr_flag_values *flag_vals,
+                        char *fs_options, int fs_options_len)
+-- 
+2.35.1
+

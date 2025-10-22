@@ -1,0 +1,39 @@
+From 8fc5aa56135caac9770fc8cae14b50d43dfb3c12 Mon Sep 17 00:00:00 2001
+From: "lei.zhang1" <lei.zhang1@amlogic.com>
+Date: Wed, 21 Jun 2023 16:49:02 +0800
+Subject: [PATCH] Incomplete WiFi list display
+
+---
+ wpa_supplicant/ctrl_iface.c | 2 +-
+ wpa_supplicant/wpa_cli.c    | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
+index 8efc08d..e2682b5 100644
+--- a/wpa_supplicant/ctrl_iface.c
++++ b/wpa_supplicant/ctrl_iface.c
+@@ -9915,7 +9915,7 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
+ 					 char *buf, size_t *resp_len)
+ {
+ 	char *reply;
+-	const int reply_size = 4096;
++	const int reply_size = 4096 * 2;
+ 	int reply_len;
+ 
+ 	if (os_strncmp(buf, WPA_CTRL_RSP, os_strlen(WPA_CTRL_RSP)) == 0 ||
+diff --git a/wpa_supplicant/wpa_cli.c b/wpa_supplicant/wpa_cli.c
+index 43ac427..ba98374 100644
+--- a/wpa_supplicant/wpa_cli.c
++++ b/wpa_supplicant/wpa_cli.c
+@@ -224,7 +224,7 @@ static void wpa_cli_msg_cb(char *msg, size_t len)
+ 
+ static int _wpa_ctrl_command(struct wpa_ctrl *ctrl, const char *cmd, int print)
+ {
+-	char buf[4096];
++	char buf[4096 * 2];
+ 	size_t len;
+ 	int ret;
+ 
+-- 
+2.40.1
+

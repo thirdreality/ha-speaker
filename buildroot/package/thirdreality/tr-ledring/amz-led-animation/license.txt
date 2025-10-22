@@ -1,0 +1,9 @@
+Copyright 2017-18 Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+
+These materials are licensed as “Program Materials” under the Program Materials License Agreement (the “Agreement”) in connection with the Alexa Voice Service Program. The Agreement is available at https://developer.amazon.com/support/legal/pml. See the Agreement for the specific terms and conditions of the Agreement. Capitalized terms not defined in this file have the meanings given to them in the Agreement.
+
+In addition to the terms and conditions of the Agreement, the following terms and conditions (“Additional Terms” and collectively with the Agreement, the “Terms”) apply to these materials. In the event of a conflict between the terms and conditions of the Agreement and these Additional Terms, these Additional Terms will apply.
+
+1. These materials may only be used to implement the Alexa attention states and transitions for the Alexa Voice Service using LEDs as described in the Attention System guidance (https://developer.amazon.com/docs/alexa-voice-service/ux-design-attention.html). If you are a subcontractor who is using these materials on behalf of a third party, you may only use these materials in connection with the products of that third party.
+
+2. These materials are Restricted Program Materials. However, the prohibition in the Agreement’s Restricted Program Materials Schedule on providing Restricted Program Materials to any contractor or other third party without our prior written consent will not apply to these materials.

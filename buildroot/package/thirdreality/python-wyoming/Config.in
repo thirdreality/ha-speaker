@@ -1,0 +1,5 @@
+config BR2_PACKAGE_PYTHON_WYOMING
+    bool "python-wyoming"
+    depends on BR2_PACKAGE_PYTHON3
+    help
+        Wyoming protocol library.

@@ -1,0 +1,66 @@
+#!/bin/sh
+#
+# Copyright (c) 2022 Amlogic, Inc. All rights reserved.
+# This source code is subject to the terms and conditions
+# defined in the file 'LICENSE' which is part of this source code package.
+# Description: S39 wifi file
+#
+
+MULTI_WIFI=/usr/bin/multi_wifi_load_driver
+
+function start_wpa_suplicant() {
+    start-stop-daemon -S -m -p /var/run/wpa_supplicant.pid -b -x /usr/sbin/wpa_supplicant -- -Dnl80211 -iwlan0 -c/etc/wpa_supplicant.conf
+}
+
+function stop_wpa_suplicant() {
+    start-stop-daemon -K -o -p /var/run/wpa_supplicant.pid
+    rm -rf /var/run/wpa_supplicant.pid
+}
+
+function stop_network_services()
+{
+    /etc/init.d/S80dnsmasq stop
+    stop_wpa_suplicant
+    killall hostapd
+}
+
+function wifi_start()
+{
+    stop_network_services
+
+    echo "start wifi station mode load driver and setup......"
+    $MULTI_WIFI station 1
+    mkdir -p /data/vendor/wifi
+    ifconfig wlan0 up > /dev/null
+    ifconfig wlan0 > /dev/null
+    ifconfig wlan0 0.0.0.0
+
+    if [ $? -eq 0 ]; then
+        echo station > /tmp/wifi_mode
+        start_wpa_suplicant
+        iw wlan0 interface add wlan1 type managed
+        ifconfig wlan1 up
+    fi
+}
+
+case "$1" in
+    start)
+        wifi_start
+        ;;
+    stop)
+        stop_network_services
+        ifconfig wlan1 down
+        ifconfig wlan0 down
+        $MULTI_WIFI station 0
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+esac
+
+exit $?
+

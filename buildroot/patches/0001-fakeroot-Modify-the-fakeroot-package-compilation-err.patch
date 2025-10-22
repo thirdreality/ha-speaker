@@ -1,0 +1,38 @@
+From 4a1dec14513927d59f08deedd72d2eed7c35c35f Mon Sep 17 00:00:00 2001
+From: "hongmei.kuang" <hongmei.kuang@amlogic.com>
+Date: Mon, 11 Aug 2025 11:32:39 +0800
+Subject: [PATCH] fakeroot: Modify the fakeroot package compilation error [1/1]
+
+PD#SWPL-227010
+
+Problem:
+When compiled using the br-aml environment, fakeroot may fail to
+compile with a low probability.
+
+Solution:
+Change fakeroot package to serial compilation.
+
+Verify:
+BA401.
+
+Change-Id: I84d5fa216e1f49f81c4d43430bdd2ad5e4851147
+Signed-off-by: hongmei.kuang <hongmei.kuang@amlogic.com>
+---
+ package/fakeroot/fakeroot.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/package/fakeroot/fakeroot.mk b/package/fakeroot/fakeroot.mk
+index 1a0ad70c13..b7450340b3 100644
+--- a/package/fakeroot/fakeroot.mk
++++ b/package/fakeroot/fakeroot.mk
+@@ -8,6 +8,7 @@ FAKEROOT_VERSION = 1.32.1
+ FAKEROOT_SOURCE = fakeroot_$(FAKEROOT_VERSION).orig.tar.gz
+ FAKEROOT_SITE = https://snapshot.debian.org/archive/debian/20230724T160429Z/pool/main/f/fakeroot
+ 
++HOST_FAKEROOT_MAKE = $(MAKE1)
+ HOST_FAKEROOT_DEPENDENCIES = host-acl
+ # Force capabilities detection off
+ # For now these are process capabilities (faked) rather than file
+-- 
+2.47.1
+

@@ -1,0 +1,20 @@
+diff --git a/handlers/flash_handler.c b/handlers/flash_handler.c
+index 2cc4480..4891efa 100644
+--- a/handlers/flash_handler.c
++++ b/handlers/flash_handler.c
+@@ -396,6 +396,15 @@ static int install_flash_image(struct img_type *img,
+                img->device);
+            return -1;
+        }
++    } else if (strstr(img->fname, "bb1st.sto.bin.signed")
++		|| strstr(img->fname, "blob-bl2e.sto.bin.signed")
++		|| strstr(img->fname, "blob-bl2x.bin.signed")
++		|| strstr(img->fname, "device-fip.bin.signed")) {
++       if(flash_erase_offset_size(mtdnum, img->seek, img->size)) {
++           ERROR("I cannot erasing %s",
++               img->device);
++           return -1;
++       }
+     } else {
+        if(flash_erase(mtdnum)) {
+            ERROR("I cannot erasing %s",

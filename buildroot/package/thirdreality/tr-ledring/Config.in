@@ -1,0 +1,5 @@
+config BR2_PACKAGE_TR_LEDRING
+    bool "thirdreality ledring module"
+    default n
+    help
+        enable thirdreality ledring module.

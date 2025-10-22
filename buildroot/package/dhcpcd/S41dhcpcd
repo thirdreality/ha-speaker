@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# Start/stop dhcpcd
+#
+
+case "$1" in
+  start)
+        echo "Starting udhcpc..." 
+        kill -9 $(pidof udhcpc) > /dev/null 2&>1
+        /sbin/udhcpc -i wlan0 -A 1 -T 1 -b
+        ;;
+  stop)
+        kill -9 $(pidof udhcpc)
+        ;;
+  reload|force-reload)
+        ;;
+  restart)
+        "$0" stop
+        sleep 1 # Prevent race condition: ensure dhcpcd stops before start.
+        "$0" start
+        ;;
+  *)
+        echo "Usage: $0 {start|stop|restart|reload|force-reload}"
+        exit 1
+esac

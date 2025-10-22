@@ -1,0 +1,24 @@
+--- a/debian/makefiles/adbd.mk	2024-05-08 03:13:45.657842806 +0000
++++ b/debian/makefiles/adbd.mk	2024-05-08 03:15:35.490955915 +0000
+@@ -136,7 +136,7 @@
+ CFLAGS += -I$(SRCDIR)/external/libselinux/include
+ CFLAGS += -include $(SRCDIR)/build/core/combo/include/arch/$(android_arch)/AndroidConfig.h
+
+-LIBS += liblog.a libfs_mgr.a libcutils.a libselinux.a libext4_utils.a -lpthread -lbsd -lpcre -lresolv -lcrypto
++LIBS += liblog.a libfs_mgr.a libcutils.a libselinux.a libext4_utils.a -lpthread  -lpcre -lresolv -lcrypto
+
+ all: adbd
+
+diff -ruN a/external/libselinux/src/procattr.c b/external/libselinux/src/procattr.c
+--- a/external/libselinux/src/procattr.c	2024-05-08 03:13:45.629841755 +0000
++++ b/external/libselinux/src/procattr.c	2024-05-08 03:14:47.905677596 +0000
+@@ -9,7 +9,8 @@
+ #include "policy.h"
+
+ #ifndef __BIONIC__
+-static pid_t gettid(void)
++pid_t gettid(void) __attribute__((weak));
++pid_t gettid(void)
+ {
+ 	return syscall(__NR_gettid);
+ }

@@ -1,0 +1,40 @@
+From 287e1181c3b75686bc412bad12be3b491b90133e Mon Sep 17 00:00:00 2001
+From: Christian Stewart <christian@paral.in>
+Date: Thu, 14 Jul 2022 18:32:44 -0700
+Subject: [PATCH] bsd fixups
+
+Signed-off-by: Christian Stewart <christian@paral.in>
+---
+ system/core/fs_mgr/fs_mgr_fstab.c    | 2 +-
+ system/core/include/cutils/sockets.h | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/system/core/fs_mgr/fs_mgr_fstab.c b/system/core/fs_mgr/fs_mgr_fstab.c
+index b133db6..68aadd4 100644
+--- a/system/core/fs_mgr/fs_mgr_fstab.c
++++ b/system/core/fs_mgr/fs_mgr_fstab.c
+@@ -17,7 +17,7 @@
+ #include <ctype.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+-#include <bsd/string.h>
++#include <string.h>
+ #include <sys/mount.h>
+ 
+ #include "fs_mgr_priv.h"
+diff --git a/system/core/include/cutils/sockets.h b/system/core/include/cutils/sockets.h
+index d3270c6..daf43ec 100644
+--- a/system/core/include/cutils/sockets.h
++++ b/system/core/include/cutils/sockets.h
+@@ -19,7 +19,7 @@
+ 
+ #include <errno.h>
+ #include <stdlib.h>
+-#include <bsd/string.h>
++#include <string.h>
+ #include <stdbool.h>
+ 
+ #ifdef HAVE_WINSOCK
+-- 
+2.35.1
+

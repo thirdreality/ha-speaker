@@ -1,0 +1,211 @@
+From b87adde033fa0f3f000366777efbe3eb0113f0c3 Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Wed, 10 Jan 2024 14:21:09 +0800
+Subject: [PATCH] exit when hash mismatchs
+
+---
+ core/cpio_utils.c |  20 +++++++-
+ core/swupdate.c   |   5 ++
+ core/util.c       | 118 ++++++++++++++++++++++++++++++++++++++++++++++
+ include/util.h    |   2 +
+ 4 files changed, 144 insertions(+), 1 deletion(-)
+
+diff --git a/core/cpio_utils.c b/core/cpio_utils.c
+index ad27b75..168c908 100644
+--- a/core/cpio_utils.c
++++ b/core/cpio_utils.c
+@@ -551,7 +551,25 @@ int copyfile(int fdin, void *out, unsigned int nbytes, unsigned long *offs, unsi
+ 			ERROR("HASH mismatch : %s <--> %s",
+ 				hashstring, newhashstring);
+ 			ret = -EFAULT;
+-			goto copyfile_exit;
++			// goto copyfile_exit;
++			if (decrypt_state.dcrypt) {
++			swupdate_DECRYPT_cleanup(decrypt_state.dcrypt);
++			}
++			if (input_state.dgst) {
++				swupdate_HASH_cleanup(input_state.dgst);
++			}
++#ifdef CONFIG_GUNZIP
++			if (gunzip_state.initialized) {
++				inflateEnd(&gunzip_state.strm);
++			}
++#endif
++#ifdef CONFIG_ZSTD
++			if (zstd_state.dctx != NULL) {
++				ZSTD_freeDStream(zstd_state.dctx);
++			}
++#endif
++			fprintf(stderr, "exiting...\n");
++			exit(1);
+ 		}
+ 	}
+ 
+diff --git a/core/swupdate.c b/core/swupdate.c
+index 41d4673..99f1341 100644
+--- a/core/swupdate.c
++++ b/core/swupdate.c
+@@ -366,6 +366,11 @@ static int install_from_file(char *fname, int check)
+ 		exit(EXIT_FAILURE);
+ 	}
+ 
++	if (check_images_hash(&swcfg.images, fdsw)) {
++		ERROR("failed to check images' hash\n");
++		exit(EXIT_FAILURE);
++	}
++
+ 	if (check) {
+ 		fprintf(stdout, "successfully checked '%s'\n", fname);
+ 		exit(EXIT_SUCCESS);
+diff --git a/core/util.c b/core/util.c
+index dc4f4af..69cfc4c 100644
+--- a/core/util.c
++++ b/core/util.c
+@@ -27,6 +27,10 @@
+ #include "swupdate.h"
+ #include "util.h"
+ #include "generated/autoconf.h"
++#include "sslapi.h"
++#include "cpiohdr.h"
++
++#define BUFF_SIZE        16384
+ 
+ /*
+  * key  is 256 bit for aes_256
+@@ -356,6 +360,120 @@ int check_hw_compatibility(struct swupdate_cfg
+ }
+ #endif
+ 
++static int hash_check(int fdin, unsigned int nbytes, unsigned char* hash)
++{
++	int ret = -1;
++	ssize_t len = 0;
++	unsigned long size;
++	unsigned char* in = NULL;
++	void* dgst = NULL;  /* use a private context for HASH */
++	unsigned char md_value[64]; //Maximum hash is 64 bytes for SHA512 and we use sha256 in swupdate
++	unsigned int md_len = 0;
++
++	if (!IsValidHash(hash)) {
++		return 0;
++	}
++
++	dgst = swupdate_HASH_init(SHA_DEFAULT);
++	if (!dgst) {
++		return -1;
++	}
++
++	in = (unsigned char*)malloc(BUFF_SIZE);
++	if (!in) {
++		goto exit;
++	}
++
++	while (nbytes > 0) {
++		memset(in, 0, BUFF_SIZE);
++		size = (nbytes < BUFF_SIZE ? nbytes : BUFF_SIZE);
++		len = read(fdin, in, size);
++		if (len < 0) {
++			ERROR("read error: I cannot go on\n");
++			goto exit;
++		}
++		nbytes -= len;
++		swupdate_HASH_update(dgst, in, len);
++	}
++
++	swupdate_HASH_final(dgst, md_value, &md_len);
++
++	if (md_len != SHA256_HASH_LENGTH || swupdate_HASH_compare(hash, md_value)) {
++		char hashstring[2 * SHA256_HASH_LENGTH + 1];
++		char newhashstring[2 * SHA256_HASH_LENGTH + 1];
++
++		hash_to_ascii(hash, hashstring);
++		hash_to_ascii(md_value, newhashstring);
++
++		ERROR("HASH mismatch : %s <--> %s", hashstring, newhashstring);
++		goto exit;
++	}
++	ret = 0;
++
++exit:
++	if (in) {
++		free(in);
++		in = NULL;
++	}
++
++	if (dgst) {
++		swupdate_HASH_cleanup(dgst);
++	}
++
++	return ret;
++}
++
++int check_images_hash(struct imglist* images, int fdsw)
++{
++	if (LIST_EMPTY(images)) {
++		ERROR("no images. exiting...");
++		return -1;
++	}
++
++	off_t orig_pos = lseek(fdsw, 0, SEEK_CUR);
++
++	struct img_type* img;
++	LIST_FOREACH(img, images, next) {
++		printf("check_images_hash(). img->fname: %s, fdsw: %d, img->size: %lld, img->offset: %ld\n", img->fname, fdsw, img->size, img->offset);
++		printf("check_images_hash(). img->sha256: ");
++		for (int i = 0; i < sizeof(img->sha256); i++) {
++			printf("%02x ", img->sha256[i]);
++		}
++		printf("\n\n");
++
++		if (img->size <= 0)
++		continue;
++
++		struct filehdr fdh;
++		if (extract_img_from_cpio(fdsw, img->offset, &fdh) < 0)
++			return -1;
++
++		int ret = hash_check(fdsw, fdh.size, img->sha256);
++		DEBUG("fdh.size: %ld, ret: %d", fdh.size, ret);
++		if (ret != 0) {
++			ERROR("failed to check hash. fname: %s, size: %lld", img->fname, img->size);
++
++			fprintf(stderr, "install_single_image(). img->sha256: ");
++			for (int i = 0; i < sizeof(img->sha256); i++) {
++				fprintf(stderr, "%02x ", img->sha256[i]);
++			}
++			fprintf(stderr, "\n\n");
++			return -1;
++		}
++
++		ret = lseek(fdsw, img->size * (-1), SEEK_CUR);
++		DEBUG("ret: %d", ret);
++		if (ret < 0) {
++			ERROR("lseek failed!\n");
++			return -1;
++		}
++	}
++
++	lseek(fdsw, orig_pos, SEEK_SET);
++
++	return 0;
++}
++
+ uintmax_t
+ from_ascii (char const *where, size_t digs, unsigned logbase)
+ {
+diff --git a/include/util.h b/include/util.h
+index 9f658ab..7e8a446 100644
+--- a/include/util.h
++++ b/include/util.h
+@@ -197,6 +197,8 @@ int count_elem_list(struct imglist *list);
+ unsigned int count_string_array(const char **nodes);
+ void free_string_array(char **nodes);
+ 
++int check_images_hash(struct imglist* images, int fdsw);
++
+ /* Decryption key functions */
+ int load_decryption_key(char *fname);
+ unsigned char *get_aes_key(void);
+-- 
+2.40.1
+

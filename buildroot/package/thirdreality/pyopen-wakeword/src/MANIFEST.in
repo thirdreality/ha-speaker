@@ -1,0 +1,2 @@
+recursive-include pyopen_wakeword/models *.tflite
+recursive-include pyopen_wakeword/lib *

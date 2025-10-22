@@ -1,0 +1,28 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+        echo "Starting CivetWeb..."
+        civetweb /etc/civetweb.conf &
+        ;;
+    stop)
+        echo "Stopping CivetWeb..."
+        killall civetweb
+        ;;
+    restart)
+        $0 stop
+	sleep 2
+        $0 start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0
+
+
+
+
+

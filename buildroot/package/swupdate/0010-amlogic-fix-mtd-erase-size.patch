@@ -1,0 +1,28 @@
+diff -uprN swupdate-2019.11/corelib/mtd-interface.c swupdate-2019.11-new/corelib/mtd-interface.c
+--- swupdate-2019.11/corelib/mtd-interface.c	2024-07-17 09:59:53.071550565 +0800
++++ swupdate-2019.11-new/corelib/mtd-interface.c	2024-07-16 19:47:09.228806800 +0800
+@@ -171,7 +171,11 @@ int flash_erase_offset_size(int mtdnum,
+ 	}
+ 
+ 	eb_start = offset /mtd->eb_size ;
+-	eb_cnt = size / mtd->eb_size;
++    if (size % mtd->eb_size != 0) {
++	    eb_cnt = size / mtd->eb_size + 1;
++    } else {
++	    eb_cnt = size / mtd->eb_size;
++    }
+ 	for (eb = eb_start; eb < eb_start + eb_cnt; eb++) {
+ 
+ 		/* Always skip bad sectors */
+diff -uprN swupdate-2019.11/handlers/flash_handler.c swupdate-2019.11-new/handlers/flash_handler.c
+--- swupdate-2019.11/handlers/flash_handler.c	2024-07-17 09:59:53.115551681 +0800
++++ swupdate-2019.11-new/handlers/flash_handler.c	2024-07-16 19:21:36.560838800 +0800
+@@ -391,7 +391,7 @@ static int install_flash_image(struct im
+            return -1;
+        }
+     } else if (strstr(img->fname, "usb.tpl")) {
+-       if(flash_erase_offset_size(mtdnum, img->seek, TPL_SIZE)) {
++       if(flash_erase_offset_size(mtdnum, img->seek, img->size)) {
+            ERROR("I cannot erasing %s",
+                img->device);
+            return -1;

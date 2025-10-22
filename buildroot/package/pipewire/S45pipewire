@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+# Copyright (c) 2024 Amlogic, Inc. All rights reserved.
+# This source code is subject to the terms and conditions defined
+# in the file 'LICENSE' which is part of this source code package.
+# Description:
+#
+#
+
+debug=0
+PW_FLAG="/etc/pipewire/pw_default_setting"
+
+function pipewire_start()
+{
+  echo "---debug mode is $debug---"
+  if [ $debug -eq 1 ]; then
+    PIPEWIRE_DEBUG="E,spa.alsa:4" pipewire >  /tmp/pw.log 2>&1 &
+    WIREPLUMBER_DEBUG="spa.bluez5*:4" wireplumber >> /tmp/pw.log 2>&1 &
+  else
+    dbus-run-session pipewire &
+    dbus-run-session wireplumber &
+  fi
+
+  pipewire-pulse &
+
+  if [ ! -f "$PW_FLAG" ]; then
+    sleep 1
+    pactl set-default-sink my-combine-sink
+    wpctl set-volume @DEFAULT_SINK@ 0.4
+    touch "$PW_FLAG"
+  fi
+}
+
+function pipewire_stop()
+{
+  killall pipewire-pulse
+  killall wireplumber
+  killall pipewire
+}
+
+case "$1" in
+  start)
+	  pipewire_start
+	;;
+  stop)
+	  pipewire_stop
+	;;
+  *)
+	echo "Usage: $0 {start|stop}"
+	exit 1
+esac
+
+exit $?

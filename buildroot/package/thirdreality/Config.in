@@ -1,0 +1,17 @@
+menu "thirdreality"
+    source "package/thirdreality/wyoming-snd-external/Config.in"
+    source "package/thirdreality/wyoming-mic-external/Config.in"
+    source "package/thirdreality/wyoming-openwakeword/Config.in"
+    source "package/thirdreality/python-wyoming/Config.in"
+    source "package/thirdreality/pyopen-wakeword/Config.in"
+
+    source "package/thirdreality/tr-ledring/Config.in"
+    source "package/thirdreality/tr-proj-ha-speaker/Config.in"
+
+    source "package/thirdreality/amlogic-boot-fip/Config.in"
+
+    source "package/thirdreality/broadcom/Config.in"
+
+    source "package/thirdreality/bluez5-utils/Config.in"
+endmenu
+
