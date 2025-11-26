@@ -1,0 +1,9 @@
+*
+!pyproject.toml
+!script/setup
+!script/run
+!wyoming_satellite/*.py
+!wyoming_satellite/utils
+!wyoming_satellite/VERSION
+!docker/run
+!sounds/*.wav

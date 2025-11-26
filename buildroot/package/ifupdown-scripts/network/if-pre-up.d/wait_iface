@@ -4,7 +4,7 @@
 # and we need to configure it, wait until it appears, but not too
 # long either. IF_WAIT_DELAY is in seconds.
 
-local IF_WAIT_DELAY=1
+IF_WAIT_DELAY=1
 if [ "${IF_WAIT_DELAY}" -a ! -e "/sys/class/net/${IFACE}" ]; then
     printf "Waiting for interface %s to appear" "${IFACE}"
     while [ ${IF_WAIT_DELAY} -gt 0 ]; do

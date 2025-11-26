@@ -4,35 +4,57 @@ PIDDIR=/var/run/wyoming
 MIC_PIDFILE=$PIDDIR/mic.pid
 SND_PIDFILE=$PIDDIR/snd.pid
 WAKEWORD_PIDFILE=$PIDDIR/wakeword.pid
+SATELLITE_PIDFILE=$PIDDIR/satellite.pid
 # LED_PIDFILE=$PIDDIR/led.pid
+
+DEVICE_CONF="/data/conf/device.json"
 
 start() {
     mkdir -p $PIDDIR
 
+    MIC_PORT=$(jq -r '.wyoming.micPort // "10600"' "$DEVICE_CONF")
+    SND_PORT=$(jq -r '.wyoming.sndPort // "10601"' "$DEVICE_CONF")
+    WAKEWORD_PORT=$(jq -r '.wyoming.wakewordPort // "10400"' "$DEVICE_CONF")
+    SATELLITE_PORT=$(jq -r '.wyoming.satellitePort // "10700"' "$DEVICE_CONF")
+    SATELLITE_NAME=$(jq -r '.wyoming.satelliteName // "thirdreality-speaker"' "$DEVICE_CONF")
+
     python3 -m wyoming_mic_external \
         --program 'arecord -r 16000 -c 2 -f S16_LE -t raw' \
         --rate 16000 --width 2 --channels 2 \
-        --uri 'tcp://0.0.0.0:10600' &
+        --uri "tcp://0.0.0.0:$MIC_PORT" &
     echo $! > $MIC_PIDFILE
 
     python3 -m wyoming_snd_external \
         --program 'aplay -D softvol -r 48000 -c 2 -f S16_LE -t raw' \
         --rate 48000 --width 2 --channels 2 \
-        --uri 'tcp://0.0.0.0:10601' &
+        --uri "tcp://0.0.0.0:$SND_PORT" &
     echo $! > $SND_PIDFILE
 
     python3 -m wyoming_openwakeword \
-        --uri 'tcp://0.0.0.0:10400' &
+        --uri "tcp://0.0.0.0:$WAKEWORD_PORT" &
     echo $! > $WAKEWORD_PIDFILE
 
+    sleep 5
+
+    python3 -m wyoming_satellite --name "$SATELLITE_NAME" \
+        --uri "tcp://0.0.0.0:$SATELLITE_PORT" \
+        --wake-word-name ok_nabu \
+        --wake-uri "tcp://0.0.0.0:$WAKEWORD_PORT" \
+        --mic-uri "tcp://0.0.0.0:$MIC_PORT" \
+        --snd-uri "tcp://0.0.0.0:$SND_PORT" &
+    echo $! > $SATELLITE_PIDFILE
+
+    # TODO: GE
+    # move led control to satellite
     # python3 /usr/share/thirdreality/script/ledring.py &
     # echo $! > $LED_PIDFILE
 }
 
 stop() {
+    [ -f $WAKEWORD_PIDFILE ] && kill "$(cat $WAKEWORD_PIDFILE)" 2>/dev/null && rm -f $WAKEWORD_PIDFILE
+    [ -f $SATELLITE_PIDFILE ] && kill "$(cat $SATELLITE_PIDFILE)" 2>/dev/null && rm -f $SATELLITE_PIDFILE
     [ -f $MIC_PIDFILE ] && kill "$(cat $MIC_PIDFILE)" 2>/dev/null && rm -f $MIC_PIDFILE
     [ -f $SND_PIDFILE ] && kill "$(cat $SND_PIDFILE)" 2>/dev/null && rm -f $SND_PIDFILE
-    [ -f $WAKEWORD_PIDFILE ] && kill "$(cat $WAKEWORD_PIDFILE)" 2>/dev/null && rm -f $WAKEWORD_PIDFILE
     # [ -f $LED_PIDFILE ] && kill "$(cat $LED_PIDFILE)" 2>/dev/null && rm -f $LED_PIDFILE
 }
 

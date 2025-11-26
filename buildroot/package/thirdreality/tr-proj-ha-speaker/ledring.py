@@ -2,11 +2,42 @@ import paho.mqtt.client as mqtt
 import subprocess
 import threading
 import time
+import json
+import sys
 
-BROKER = "10.1.0.58"
-PORT = 1883
-USERNAME = "r3"
-PASSWORD = "shushi6688"
+DEVICE_CONF = "/data/conf/device.json"
+
+# Read MQTT configuration from device.json
+try:
+    with open(DEVICE_CONF, 'r') as f:
+        config = json.load(f)
+    
+    mqtt_config = config.get('mqtt', {})
+    BROKER = mqtt_config.get('broker')
+    PORT = mqtt_config.get('port')
+    USERNAME = mqtt_config.get('user')
+    PASSWORD = mqtt_config.get('password')
+    
+    # Validate all required fields are present and not empty
+    if not all([BROKER, PORT, USERNAME, PASSWORD]):
+        print("Error: Missing or empty MQTT configuration in device.json")
+        sys.exit(1)
+    
+    # Convert port to integer
+    PORT = int(PORT)
+    
+except FileNotFoundError:
+    print(f"Error: Configuration file not found: {DEVICE_CONF}")
+    sys.exit(1)
+except json.JSONDecodeError as e:
+    print(f"Error: Failed to parse JSON: {e}")
+    sys.exit(1)
+except ValueError as e:
+    print(f"Error: Invalid port number: {e}")
+    sys.exit(1)
+except Exception as e:
+    print(f"Error: Failed to read configuration: {e}")
+    sys.exit(1)
 
 TOPICS = {
     "speaker/listening": "/usr/share/thirdreality/animation/active-waking.animation",

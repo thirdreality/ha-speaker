@@ -1,7 +1,7 @@
 #!/bin/sh
 
-SYSTEM_STATUS="/usr/share/thirdreality/conf/device_info.json"
-SYSTEM_STATUS_TMP="/tmp/tmp.json"
+DEVICE_CONF="/data/conf/device.json"
+DEVICE_CONF_TMP="/tmp/tmp.json"
 CHECK_INTERVAL_CONNECTIVITY=5
 CHECK_INTERVAL_SSID=3
 
@@ -10,9 +10,9 @@ update_net_state()
     local new_state="$1"
     (
         flock -x 200
-        jq ".network.state = \"$new_state\"" "$SYSTEM_STATUS" > "$SYSTEM_STATUS_TMP" && mv "$SYSTEM_STATUS_TMP" "$SYSTEM_STATUS"
+        jq ".network.status = \"$new_state\"" "$DEVICE_CONF" > "$DEVICE_CONF_TMP" && mv "$DEVICE_CONF_TMP" "$DEVICE_CONF"
         sync
-    ) 200>/var/lock/statusfile.lock
+    ) 200>/tmp/device_conf.lock
 }
 
 netUpAction()

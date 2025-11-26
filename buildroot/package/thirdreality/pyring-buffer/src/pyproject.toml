@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=62.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name        = "pyring_buffer"
+version     = "1.0.2"
+license     = {text = "Apache-2.0"}
+description = "A pure Python ring buffer for bytes"
+readme      = "README.md"
+authors     = [
+    {name = "Michael Hansen", email = "mike@rhasspy.org"}
+]
+keywords    = ["ring", "circular", "buffer"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Text Processing :: Linguistic",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+requires-python = ">=3.9.0"
+
+[project.urls]
+"Source Code" = "http://github.com/rhasspy/pyring-buffer"
+
+[tool.setuptools]
+platforms = ["any"]
+zip-safe  = true
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["pyring_buffer"]
+exclude = ["tests", "tests.*"]
+
+[project.optional-dependencies]
+dev = [
+    "black==22.12.0",
+    "flake8==6.0.0",
+    "isort==5.11.3",
+    "mypy==0.991",
+    "pylint==2.15.9",
+    "pytest==7.4.4",
+    "build==1.2.2",
+]

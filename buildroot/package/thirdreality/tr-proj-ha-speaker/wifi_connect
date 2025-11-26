@@ -1,6 +1,6 @@
 #!/bin/sh
 
-DEVICE_INFO="/usr/share/thirdreality/conf/device_info.json"
+DEVICE_INFO="/data/conf/device.json"
 DEVICE_INFO_TMP="/tmp/tmp.json"
 
 switch_wifi=0

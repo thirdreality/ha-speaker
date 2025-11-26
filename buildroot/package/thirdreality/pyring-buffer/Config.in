@@ -1,0 +1,5 @@
+config BR2_PACKAGE_PYRING_BUFFER
+	bool "pyring buffer"
+    default n
+	help
+        https://github.com/rhasspy/pyring-buffer
