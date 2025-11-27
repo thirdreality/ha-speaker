@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-/app/script/run \
-    --uri tcp://0.0.0.0:10700 "$@"

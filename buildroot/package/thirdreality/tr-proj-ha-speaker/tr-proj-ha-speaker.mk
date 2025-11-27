@@ -22,7 +22,6 @@ define TR_PROJ_HA_SPEAKER_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/device.json ${REALITY_DIR}/conf/device.json
 	$(INSTALL) -D -m 0755 $(@D)/setup_env.sh ${REALITY_DIR}/script/setup_env.sh
 	$(INSTALL) -D -m 0755 $(@D)/wifi_connect ${REALITY_DIR}/script/wifi_connect
-	$(INSTALL) -D -m 0755 $(@D)/ledring.py ${REALITY_DIR}/script/ledring.py
 	$(INSTALL) -D -m 0755 $(@D)/S99voice-assistant $(TARGET_DIR)/etc/init.d/S99voice-assistant
 
 	@echo "firmwareVersion is $(IMAGE_VERSION)"

@@ -1,15 +1,16 @@
 #!/bin/sh
 
+/usr/share/thirdreality/script/setup_env.sh
+
 PIDDIR=/var/run/wyoming
 MIC_PIDFILE=$PIDDIR/mic.pid
 SND_PIDFILE=$PIDDIR/snd.pid
 WAKEWORD_PIDFILE=$PIDDIR/wakeword.pid
 SATELLITE_PIDFILE=$PIDDIR/satellite.pid
-# LED_PIDFILE=$PIDDIR/led.pid
 
 DEVICE_CONF="/data/conf/device.json"
 
-start() {
+start_wyoming() {
     mkdir -p $PIDDIR
 
     MIC_PORT=$(jq -r '.wyoming.micPort // "10600"' "$DEVICE_CONF")
@@ -34,7 +35,8 @@ start() {
         --uri "tcp://0.0.0.0:$WAKEWORD_PORT" &
     echo $! > $WAKEWORD_PIDFILE
 
-    sleep 5
+    # TODO: GE
+    sleep 3
 
     python3 -m wyoming_satellite --name "$SATELLITE_NAME" \
         --uri "tcp://0.0.0.0:$SATELLITE_PORT" \
@@ -43,19 +45,13 @@ start() {
         --mic-uri "tcp://0.0.0.0:$MIC_PORT" \
         --snd-uri "tcp://0.0.0.0:$SND_PORT" &
     echo $! > $SATELLITE_PIDFILE
-
-    # TODO: GE
-    # move led control to satellite
-    # python3 /usr/share/thirdreality/script/ledring.py &
-    # echo $! > $LED_PIDFILE
 }
 
-stop() {
+stop_wyoming() {
     [ -f $WAKEWORD_PIDFILE ] && kill "$(cat $WAKEWORD_PIDFILE)" 2>/dev/null && rm -f $WAKEWORD_PIDFILE
     [ -f $SATELLITE_PIDFILE ] && kill "$(cat $SATELLITE_PIDFILE)" 2>/dev/null && rm -f $SATELLITE_PIDFILE
     [ -f $MIC_PIDFILE ] && kill "$(cat $MIC_PIDFILE)" 2>/dev/null && rm -f $MIC_PIDFILE
     [ -f $SND_PIDFILE ] && kill "$(cat $SND_PIDFILE)" 2>/dev/null && rm -f $SND_PIDFILE
-    # [ -f $LED_PIDFILE ] && kill "$(cat $LED_PIDFILE)" 2>/dev/null && rm -f $LED_PIDFILE
 }
 
 restart() {
@@ -65,8 +61,8 @@ restart() {
 }
 
 case "$1" in
-    netup) start ;;
-    netdown) stop ;;
+    start) start_wyoming ;;
+    stop) stop_wyoming ;;
     restart) restart ;;
     *) echo "Usage: $0 {netup|netdown|restart}" ;;
 esac

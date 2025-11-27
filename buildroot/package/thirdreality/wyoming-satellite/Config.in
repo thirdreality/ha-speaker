@@ -3,4 +3,4 @@ config BR2_PACKAGE_WYOMING_SATELLITE
     depends on BR2_PACKAGE_PYTHON_WYOMING
     default n
 	help
-        https://github.com/rhasspy/wyoming-satellite
+        https://github.com/thirdreality/wyoming-satellite

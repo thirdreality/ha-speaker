@@ -16,11 +16,5 @@
         "wakewordPort": "10400",
         "satellitePort": "10700",
         "satelliteName": "thirdreality-speaker"
-    },
-    "mqtt": {
-        "user":"",
-        "password": "",
-        "broker": "",
-        "port": ""
     }
 }
