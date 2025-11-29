@@ -68,6 +68,8 @@ if [ ! -d "/sys/class/gpio/gpio438" ]; then
     echo "$MIC_MUTE" > /sys/class/gpio/gpio438/value
 fi
 
+killall tr_ledring 2>/dev/null || true
+sleep 0.2
 /usr/share/thirdreality/bin/tr_ledring &
 sleep 0.5
 dbus-send --system --type=signal /com/3r/EventBus com._3reality.EventBus.LedShow boolean:false array:string:'/usr/share/thirdreality/animation/none.animation'

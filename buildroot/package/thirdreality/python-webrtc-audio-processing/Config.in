@@ -1,0 +1,14 @@
+config BR2_PACKAGE_PYTHON_WEBRTC_AUDIO_PROCESSING
+	bool "python-webrtc-audio-processing"
+	depends on BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_HOST_SWIG
+	help
+	  Python binding of WebRTC Audio Processing.
+	  
+	  Provides Voice Activity Detection (VAD), Noise Suppression (NS),
+	  and Automatic Gain Control (AGC) functionalities.
+	  
+	  https://github.com/xiongyihui/python-webrtc-audio-processing
+
+comment "python-webrtc-audio-processing needs Python3"
+	depends on !BR2_PACKAGE_PYTHON3

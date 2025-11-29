@@ -22,6 +22,9 @@ start_wyoming() {
     python3 -m wyoming_mic_external \
         --program 'arecord -r 16000 -c 2 -f S16_LE -t raw' \
         --rate 16000 --width 2 --channels 2 \
+        --enable-afe --afe-ns-level 3 \
+        --afe-agc --afe-agc-target 6 \
+        --afe-vad --afe-vad-level 2 \
         --uri "tcp://0.0.0.0:$MIC_PORT" &
     echo $! > $MIC_PIDFILE
 
