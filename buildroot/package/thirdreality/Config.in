@@ -13,6 +13,7 @@ menu "thirdreality"
     source "package/thirdreality/snapcast/Config.in"
 
     source "package/thirdreality/tr-ledring/Config.in"
+    source "package/thirdreality/tr-supervisor/Config.in"
     source "package/thirdreality/tr-proj-ha-speaker/Config.in"
 endmenu
 

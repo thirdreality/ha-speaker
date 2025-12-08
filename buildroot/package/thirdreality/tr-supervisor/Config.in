@@ -1,0 +1,5 @@
+config BR2_PACKAGE_TR_SUPERVISOR
+	bool "ThirdReality supervisor"
+	depends on BR2_PACKAGE_PYTHON3
+	help
+        ThirdReality supervisor
