@@ -1,0 +1,55 @@
+#!/bin/sh
+
+DEVICE_CONF="/data/conf/device.json"
+
+SUPERVISOR_PID="/var/run/thirdreality/supervisor.pid"
+NETMONITOR_PID="/var/run/thirdreality/netmonitor.pid"
+
+start_service()
+{
+    /usr/share/thirdreality/script/setup_env.sh
+
+    NETWORK_STATUS=$(jq -r '.network.status // "disconnected"' "$DEVICE_CONF" 2>/dev/null)
+    if [ "$NETWORK_STATUS" != "connected" ]; then
+        /etc/init.d/S44bluetooth up
+        aplay -Dsoftvol /usr/share/thirdreality/audio/setup-mode.wav &
+    fi
+
+    python3 -m supervisor 2>/dev/null &
+    echo $! > "$SUPERVISOR_PID"
+
+    /usr/share/thirdreality/script/netmonitor start
+    /usr/share/thirdreality/script/voice-assistant start
+    /usr/share/thirdreality/script/music-assistant start
+}
+
+stop_pid()
+{
+    local pidfile="$1"
+    if [ -f "$pidfile" ]; then
+        kill "$(cat "$pidfile")" 2>/dev/null
+        rm -f "$pidfile"
+    fi
+}
+
+stop_service()
+{
+    echo "Stopping services..."
+    /etc/init.d/S44bluetooth stop
+
+    stop_pid "$SUPERVISOR_PID"
+
+    /usr/share/thirdreality/script/netmonitor stop
+    /usr/share/thirdreality/script/voice-assistant stop
+    /usr/share/thirdreality/script/music-assistant stop
+}
+
+case "$1" in
+    start)
+        start_service
+    ;;
+    stop)
+        stop_service
+    ;;
+    *) echo "Usage: $0 {start|stop}" ;;
+esac

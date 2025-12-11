@@ -4,6 +4,7 @@ DEVICE_CONF="/data/conf/device.json"
 DEVICE_CONF_TMP="/tmp/tmp.json"
 CHECK_INTERVAL_CONNECTIVITY=5
 CHECK_INTERVAL_SSID=3
+NETMONITOR_PIDFILE="/var/run/thirdreality/netmonitor.pid"
 
 update_net_state()
 {
@@ -110,4 +111,52 @@ netCheckState()
     done
 }
 
-netCheckState
+start()
+{
+    if [ -f "$NETMONITOR_PIDFILE" ] && kill -0 "$(cat "$NETMONITOR_PIDFILE")" 2>/dev/null; then
+        echo "netcheck already running (PID: $(cat $NETMONITOR_PIDFILE))"
+        exit 0
+    fi
+
+    echo "Starting netcheck..."
+    netCheckState &
+    echo $! > "$NETMONITOR_PIDFILE"
+}
+
+stop()
+{
+    if [ ! -f "$NETMONITOR_PIDFILE" ]; then
+        echo "netcheck not running."
+        exit 0
+    fi
+
+    if [ -f "$NETMONITOR_PIDFILE" ]; then
+        kill "$(cat "$NETMONITOR_PIDFILE")" 2>/dev/null
+        rm -f "$NETMONITOR_PIDFILE"
+    fi
+}
+
+restart()
+{
+    stop
+    sleep 1
+    start
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0

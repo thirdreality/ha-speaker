@@ -1,8 +1,6 @@
 #!/bin/sh
 
-/usr/share/thirdreality/script/setup_env.sh
-
-PIDDIR=/var/run/wyoming
+PIDDIR=/var/run/thirdreality
 MIC_PIDFILE=$PIDDIR/mic.pid
 SND_PIDFILE=$PIDDIR/snd.pid
 WAKEWORD_PIDFILE=$PIDDIR/wakeword.pid
@@ -22,9 +20,10 @@ start_wyoming() {
     python3 -m wyoming_mic_external \
         --program 'arecord -r 16000 -c 2 -f S16_LE -t raw' \
         --rate 16000 --width 2 --channels 2 \
-        --enable-afe --afe-ns-level 3 \
+        --samples-per-chunk 1024 \
+        --enable-afe --afe-ns-level 2 \
         --afe-agc --afe-agc-target 6 \
-        --afe-vad --afe-vad-level 2 \
+        --afe-vad --afe-vad-level 1 \
         --uri "tcp://0.0.0.0:$MIC_PORT" &
     echo $! > $MIC_PIDFILE
 
@@ -58,14 +57,20 @@ stop_wyoming() {
 }
 
 restart() {
-    stop
+    stop_wyoming
     sleep 1
-    start
+    start_wyoming
 }
 
 case "$1" in
-    start) start_wyoming ;;
-    stop) stop_wyoming ;;
-    restart) restart ;;
+    start)
+        start_wyoming
+    ;;
+    stop)
+        stop_wyoming
+    ;;
+    restart)
+        restart
+    ;;
     *) echo "Usage: $0 {netup|netdown|restart}" ;;
 esac

@@ -216,8 +216,7 @@ wifi()
         exit 10
     }
 
-    wpa_cli -i wlan0 status | grep -iq completed
-    if [ $? -eq 0 ]; then
+    if wpa_cli -i wlan0 status | grep -iq completed; then
         switch_wifi=1
         wifi_disconnect
         sleep 1
@@ -231,12 +230,12 @@ wifi()
         echo "Connecting to ${ssid}..."
         rc=$(wpa_cli status | grep 'wpa_state=' | cut -d'=' -f2)
         echo "Status: $rc"
-        if [ $rc = "COMPLETED" ]; then
+        if [ "$rc" = "COMPLETED" ]; then
             connected=1
             echo "Connect ${ssid} successfully!"
             break
         fi
-        let cnt++
+        cnt=$((cnt + 1))
         sleep 1
     done
 

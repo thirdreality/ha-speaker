@@ -20,9 +20,16 @@ endif
 
 define TR_PROJ_HA_SPEAKER_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/device.json ${REALITY_DIR}/conf/device.json
-	$(INSTALL) -D -m 0755 $(@D)/setup_env.sh ${REALITY_DIR}/script/setup_env.sh
-	$(INSTALL) -D -m 0755 $(@D)/wifi_connect ${REALITY_DIR}/script/wifi_connect
-	$(INSTALL) -D -m 0755 $(@D)/S99voice-assistant $(TARGET_DIR)/etc/init.d/S99voice-assistant
+	
+	$(INSTALL) -D -m 0755 $(@D)/audio/setup-mode.wav ${REALITY_DIR}/audio/setup-mode.wav
+	$(INSTALL) -D -m 0755 $(@D)/audio/1khz_ch2.wav ${REALITY_DIR}/audio/1khz_ch2.wav
+
+	$(INSTALL) -D -m 0755 $(@D)/script/setup_env.sh ${REALITY_DIR}/script/setup_env.sh
+	$(INSTALL) -D -m 0755 $(@D)/script/wifi_connect ${REALITY_DIR}/script/wifi_connect
+	$(INSTALL) -D -m 0755 $(@D)/script/netmonitor ${REALITY_DIR}/script/netmonitor
+	$(INSTALL) -D -m 0755 $(@D)/script/music-assistant ${REALITY_DIR}/script/music-assistant
+	$(INSTALL) -D -m 0755 $(@D)/script/voice-assistant ${REALITY_DIR}/script/voice-assistant
+	$(INSTALL) -D -m 0755 $(@D)/script/S99ha-speaker $(TARGET_DIR)/etc/init.d/S99ha-speaker
 
 	@echo "firmwareVersion is $(IMAGE_VERSION)"
 	@jq '.device.firmwareVersion = "$(IMAGE_VERSION)"' $(TARGET_DIR)/usr/share/thirdreality/conf/device.json > \

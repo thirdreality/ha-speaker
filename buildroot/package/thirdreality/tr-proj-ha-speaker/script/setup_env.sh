@@ -20,7 +20,7 @@ if [ ! -s "$SOUND_CONF" ] || ! jq empty "$SOUND_CONF" 2>/dev/null; then
 EOF
 fi
 
-VOL=$(jq -r '.volume // 20' "$SOUND_CONF")
+VOL=$(jq -r '.volume // 30' "$SOUND_CONF")
 MIC_GAIN=$(jq -r '.mic_gain // 30' "$SOUND_CONF")
 MIC_MUTE=$(jq -r '.mic_mute // 1' "$SOUND_CONF")
 
@@ -30,7 +30,7 @@ fi
 
 MAC_ADDRESS=$(ifconfig wlan0 | grep "HWaddr" | awk '{print $5}')
 while [ -z "$MAC_ADDRESS" ]; do
-    sleep 1
+    sleep 0.5
     MAC_ADDRESS=$(ifconfig wlan0 | grep "HWaddr" | awk '{print $5}')
 done
 DEVICE_NAME="3RSPK-${MAC_ADDRESS//:/}"
@@ -45,8 +45,6 @@ if [ "$CURRENT_MAC" != "$MAC_ADDRESS" ] || [ "$CURRENT_NAME" != "$DEVICE_NAME" ]
     if ! cmp -s "$DEVICE_CONF" "$DEVICE_CONF_BAK"; then
         cp "$DEVICE_CONF" "$DEVICE_CONF_BAK"
     fi
-
-    sync
 fi
 
 head -c 38400 /dev/zero | aplay -D softvol -t raw -f S32_LE -c2 -r48000 > /dev/null 2>&1
