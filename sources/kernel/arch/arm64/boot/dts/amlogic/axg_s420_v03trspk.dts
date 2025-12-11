@@ -258,7 +258,7 @@
 			mclk-fs = <256>;
 			continuous-clock;
 			/* tdmb clk using tdmc so no bclk-inv */
-			//bitclock-inversion;
+			bitclock-inversion;
 			//frame-inversion;
 			bitclock-master = <&tdmc>;
 			frame-master = <&tdmc>;
