@@ -4,7 +4,7 @@
 #
 ################################################################################
 
-SNAPCAST_VERSION = v0.27.0
+SNAPCAST_VERSION = v0.29.0
 SNAPCAST_SITE = $(call github,badaix,snapcast,$(SNAPCAST_VERSION))
 SNAPCAST_DEPENDENCIES = libogg alsa-lib avahi # libstdcpp libatomic libflac libvorbisidec
 SNAPCAST_LICENSE = GPL-3.0+
@@ -26,9 +26,9 @@ endef
 ifeq ($(BR2_PACKAGE_SNAPCAST_CLIENT),y)
 SNAPCAST_POST_INSTALL_TARGET_HOOKS += SNAPCLIENT_INSTALL_CONFIG
 
-define SNAPCLIENT_INSTALL_INIT_SYSV
-	$(INSTALL) -m 0755 -D $(SNAPCAST_PKGDIR)/S99snapclient $(TARGET_DIR)/etc/init.d/S99snapclient
-endef
+# define SNAPCLIENT_INSTALL_INIT_SYSV
+# 	$(INSTALL) -m 0755 -D $(SNAPCAST_PKGDIR)/S99snapclient $(TARGET_DIR)/etc/init.d/S99snapclient
+# endef
 
 define SNAPCLIENT_INSTALL_INIT_SYSTEMD
 	$(INSTALL) -D -m 0644 $(@D)/client/debian/snapclient.service \
@@ -71,7 +71,7 @@ define SNAPCAST_INSTALL_INIT_SYSTEMD
 endef
 
 define SNAPCAST_INSTALL_INIT_SYSV
-	$(SNAPCLIENT_INSTALL_INIT_SYSV)
+	# $(SNAPCLIENT_INSTALL_INIT_SYSV)
 	$(SNAPSERVER_INSTALL_INIT_SYSV)
 endef
 
