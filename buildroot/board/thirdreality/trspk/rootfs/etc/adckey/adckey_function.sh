@@ -38,6 +38,7 @@ factory_reset() {
     else
         touch /tmp/factory_reset
     fi
+    aplay -Dsoftvol -c2 /usr/share/thirdreality/audio/factory_reset.wav &
     echo "factory resetting..."
     dbus-send --system --type=signal /com/3r/EventBus com._3reality.EventBus.LedShow boolean:false array:string:'/usr/share/thirdreality/animation/ntf_incoming.animation'
 

@@ -19,10 +19,12 @@ else
 endif
 
 define TR_PROJ_HA_SPEAKER_INSTALL_TARGET_CMDS
-	$(INSTALL) -D -m 0755 $(@D)/device.json ${REALITY_DIR}/conf/device.json
+	$(INSTALL) -D -m 0644 $(@D)/device.json ${REALITY_DIR}/conf/device.json
 	
-	$(INSTALL) -D -m 0755 $(@D)/audio/setup-mode.wav ${REALITY_DIR}/audio/setup-mode.wav
-	$(INSTALL) -D -m 0755 $(@D)/audio/1khz_ch2.wav ${REALITY_DIR}/audio/1khz_ch2.wav
+	$(INSTALL) -D -m 0644 $(@D)/audio/setup_mode.wav ${REALITY_DIR}/audio/setup_mode.wav
+	$(INSTALL) -D -m 0644 $(@D)/audio/change_wifi.wav ${REALITY_DIR}/audio/change_wifi.wav
+	$(INSTALL) -D -m 0644 $(@D)/audio/not_ready.wav ${REALITY_DIR}/audio/not_ready.wav
+	$(INSTALL) -D -m 0644 $(@D)/audio/factory_reset.wav ${REALITY_DIR}/audio/factory_reset.wav
 
 	$(INSTALL) -D -m 0755 $(@D)/script/setup_env.sh ${REALITY_DIR}/script/setup_env.sh
 	$(INSTALL) -D -m 0755 $(@D)/script/wifi_connect ${REALITY_DIR}/script/wifi_connect

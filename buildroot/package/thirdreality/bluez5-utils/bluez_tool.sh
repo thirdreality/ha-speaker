@@ -115,6 +115,7 @@ case "$1" in
 		sleep 1
 		Blue_start
 		service_up
+		aplay -Dsoftvol -c2 /usr/share/thirdreality/audio/change_wifi.wav &
 		;;
 	*)
 		echo "Usage: $0 {start|stop|up|down|restart}"
