@@ -1,13 +1,10 @@
 #!/bin/sh
 
+BT_PIDFILE="/var/run/thirdreality/bluetooth.pid"
 LED_PIDFILE="/var/run/thirdreality/btgatt_led.pid"
+GATT_PIDFILE="/var/run/thirdreality/btgatt_server.pid"
 
 mkdir -p /var/run/thirdreality/
-
-brcm_bt_init()
-{
-	brcm_patchram_plus --enable_hci --no2bytes --tosleep 200000 --baudrate 115200 -patchram /etc/bluetooth/bcm4343a1.hcd /dev/ttyS1 &
-}
 
 check_hci0()
 {
@@ -41,29 +38,39 @@ led_loop() {
 
 service_down()
 {
-	killall btgatt-server
-	hciconfig hci0 down
+	start-stop-daemon -K -q -p "$GATT_PIDFILE" 2>/dev/null
+    rm -f "$GATT_PIDFILE"
 
-	if [ -f "$LED_PIDFILE" ]; then
-		kill "$(cat $LED_PIDFILE)" 2>/dev/null
-		rm -f "$LED_PIDFILE"
-	fi
+    start-stop-daemon -K -q -p "$LED_PIDFILE" 2>/dev/null
+    rm -f "$LED_PIDFILE"
+
+    hciconfig hci0 down 2>/dev/null
 }
 
 service_up()
 {
-	killall btgatt-server
-
 	check_hci0
 	hciconfig hci0 up
 	hciconfig hci0 piscan
 	hciconfig hci0 leadv 3
 	hcitool -i hci0 cmd 0x08 0x000A 01
 	sleep 1
-	btgatt-server &
 
-	led_loop &
-	echo $! > "$LED_PID_FILE"
+    start-stop-daemon -S -q \
+        -p "$GATT_PIDFILE" -m -b \
+        -x /usr/bin/btgatt-server
+
+    if [ -f "$LED_PIDFILE" ]; then
+        local led_pid=$(cat "$LED_PIDFILE" 2>/dev/null)
+        if [ -n "$led_pid" ] && kill -0 "$led_pid" 2>/dev/null; then
+            return 0
+        else
+            rm -f "$LED_PIDFILE"
+        fi
+	else
+		led_loop &
+		echo $! > "$LED_PIDFILE"
+    fi
 }
 
 Blue_start()
@@ -72,14 +79,19 @@ Blue_start()
 	usleep 500000
 	echo 1 > /sys/class/rfkill/rfkill0/state
 
-	brcm_bt_init
+    start-stop-daemon -S -q \
+        -p "$BT_PIDFILE" -m -b \
+        -x /usr/bin/brcm_patchram_plus -- \
+        --enable_hci --no2bytes --tosleep 200000 --baudrate 115200 \
+        -patchram /etc/bluetooth/bcm4343a1.hcd /dev/ttyS1
 }
 
 Blue_stop()
 {
 	echo -n "Stopping bluez"
 	service_down
-	killall brcm_patchram_plus
+    start-stop-daemon -K -q -p "$BT_PIDFILE" 2>/dev/null
+    rm -f "$BT_PIDFILE"
 	sleep 2
 	echo 0 > /sys/class/rfkill/rfkill0/state
 }
@@ -97,8 +109,15 @@ case "$1" in
 	down)
 		service_down &
 		;;
+	restart)
+		service_down
+		Blue_stop
+		sleep 1
+		Blue_start
+		service_up
+		;;
 	*)
-		echo "Usage: $0 {start|stop|up|down}"
+		echo "Usage: $0 {start|stop|up|down|restart}"
 		exit 1
 esac
 

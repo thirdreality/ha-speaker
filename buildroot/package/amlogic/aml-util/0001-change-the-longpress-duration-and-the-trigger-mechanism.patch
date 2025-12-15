@@ -1,0 +1,61 @@
+From 553f273cc18812849dd1c644d7b10d552b6a1159 Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Mon, 15 Dec 2025 15:50:13 +0800
+Subject: [PATCH] 1. Change the long press duration to 10 seconds. 2. Once the
+ long press is reached, immediately call adckey_function.sh without waiting
+ for the button to be released.
+
+---
+ events_process.cpp | 23 +++++++++++++++++++++--
+ 1 file changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/events_process.cpp b/events_process.cpp
+index ee4edf0..1ab89dd 100644
+--- a/events_process.cpp
++++ b/events_process.cpp
+@@ -163,13 +163,33 @@ void EventsProcess::time_key(key_timer_t *info) {
+     int key_code = info->key_code;
+     int count = info->count;
+     int keymode = getKeyMode(key_code);
+-    usleep(750000);  // 750 ms == "long"
++    usleep(10000000);  // 10000 ms == 10s (10秒)
+     pthread_mutex_lock(&key_queue_mutex);
+     if (key_last_down == key_code && key_down_count == count) {
+         if (info->ke) {
+             info->ke->longPress = true;
+             if (keymode != 0)
+                 info->ke->curlongPress = true;
++
++            const char* keyType = getKeyType(key_code);
++            if (keyType != NULL) {
++                char buf[100];
++                memset(buf, '\0', sizeof(buf));
++                if (keymode != 0) {
++                    sprintf(buf, "%s %s%s", "/etc/adckey/adckey_function.sh", "curlongpress", keyType);
++                } else {
++                    sprintf(buf, "%s %s%s %llu", "/etc/adckey/adckey_function.sh", "longpress", keyType, 10000ULL);
++                }
++                pthread_mutex_unlock(&key_queue_mutex);
++                // printf("Long press triggered after 10s: run %s\n", buf);
++                int res = system(buf);
++                if (res != 0) printf("run %s exception!!!\n", buf);
++                pthread_mutex_lock(&key_queue_mutex);
++
++                if (keymode == 0) {
++                    info->ke->longPress = false;
++                }
++            }
+         }
+         else {
+           printf("##recive key but no events##\n");
+@@ -187,7 +207,6 @@ void EventsProcess::time_key(key_timer_t *info) {
+     }
+ }
+ 
+-
+ const char* EventsProcess::getKeyType(int key) {
+     int i;
+     for (i = 0; i < num_keys; i++) {
+-- 
+2.40.1
+

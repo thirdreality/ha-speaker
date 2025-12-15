@@ -32,12 +32,18 @@ vol() {
 }
 
 factory_reset() {
+    if [ -f "/tmp/factory_reset" ];then
+        rm -rf /tmp/factory_reset
+        exit 0
+    else
+        touch /tmp/factory_reset
+    fi
     echo "factory resetting..."
     dbus-send --system --type=signal /com/3r/EventBus com._3reality.EventBus.LedShow boolean:false array:string:'/usr/share/thirdreality/animation/ntf_incoming.animation'
 
     sleep 3
 
-    for i in 'seq 3'; do
+    for i in $(seq 3); do
         killall5 -9
         sleep 1
     done
@@ -64,11 +70,24 @@ mic_mute() {
     sync
 }
 
+change_wifi() {
+    if [ -f "/tmp/change_wifi" ];then
+        rm -rf /tmp/change_wifi
+        exit 0
+    else
+        touch /tmp/change_wifi
+    fi
+
+    dbus-send --system --type=signal /com/3r/EventBus com._3reality.EventBus.LedShow boolean:false array:string:'/usr/share/thirdreality/animation/ntf_incoming.animation'
+    /etc/init.d/S44bluetooth restart
+}
+
 case $1 in
     "Volup") vol "up" ;;
     "Voldown") vol "down" ;;
     "Home") echo "home was pressed";;
     "Tap") echo "tap was pressed";;
+    "longpressTap") change_wifi ;;
     "Mute") mic_mute ;;
     "longpressHome") factory_reset ;;
     *) echo "no function to add this case: $1" ;;
