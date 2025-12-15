@@ -14,7 +14,6 @@
         "sndPort": "10601",
         "micPort": "10600",
         "wakewordPort": "10400",
-        "satellitePort": "10700",
-        "satelliteName": "thirdreality-speaker"
+        "satellitePort": "10700"
     }
 }

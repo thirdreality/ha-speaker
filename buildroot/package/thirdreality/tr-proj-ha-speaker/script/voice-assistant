@@ -15,7 +15,7 @@ start_wyoming() {
     SND_PORT=$(jq -r '.wyoming.sndPort // "10601"' "$DEVICE_CONF")
     WAKEWORD_PORT=$(jq -r '.wyoming.wakewordPort // "10400"' "$DEVICE_CONF")
     SATELLITE_PORT=$(jq -r '.wyoming.satellitePort // "10700"' "$DEVICE_CONF")
-    SATELLITE_NAME=$(jq -r '.wyoming.satelliteName // "thirdreality-speaker"' "$DEVICE_CONF")
+    SATELLITE_NAME=$(jq -r '.device.name // "thirdreality-speaker"' "$DEVICE_CONF")
 
     python3 -m wyoming_mic_external \
         --program 'arecord -r 16000 -c 2 -f S16_LE -t raw' \
@@ -41,6 +41,7 @@ start_wyoming() {
     sleep 3
 
     python3 -m wyoming_satellite --name "$SATELLITE_NAME" \
+        --timeout-wav "/usr/share/thirdreality/audio/not_ready.wav" \
         --uri "tcp://0.0.0.0:$SATELLITE_PORT" \
         --wake-word-name ok_nabu \
         --wake-uri "tcp://0.0.0.0:$WAKEWORD_PORT" \
