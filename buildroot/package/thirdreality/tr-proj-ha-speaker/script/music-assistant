@@ -5,6 +5,7 @@
 NAME=snapclient
 DAEMON=/usr/bin/$NAME
 PIDFILE=/var/run/$NAME/pid
+DEVICE_CONF="/data/conf/device.json"
 
 [ -r /etc/default/$NAME ] && . /etc/default/$NAME
 SNAPCLIENT_OPTS="-d $SNAPCLIENT_OPTS"
@@ -12,6 +13,9 @@ SNAPCLIENT_OPTS="-d $SNAPCLIENT_OPTS"
 if [ "$START_SNAPCLIENT" != "true" ] ; then
   exit 0
 fi
+
+SPK_NAME=$(jq -r '.device.name // "3RSPK-DEFAULT"' "$DEVICE_CONF")
+hostname "$SPK_NAME"
 
 start() {
 	echo -n "Starting $NAME: "
