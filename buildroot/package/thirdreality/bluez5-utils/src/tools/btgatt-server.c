@@ -108,6 +108,13 @@ static bool advertising = false;
 static volatile bool should_exit = false;
 static unsigned int no_client_timeout_id = 0;
 
+static void delayed_exit_cb(int timeout_id, void *user_data)
+{
+    printf("[EXIT] Delayed exit after sending WiFi result\n");
+    should_exit = true;
+    mainloop_quit();
+}
+
 static int process_wifi_config(const char *json_str, char *response, size_t response_len)
 {
     cJSON *root = cJSON_Parse(json_str);
@@ -474,6 +481,7 @@ static void wifi_config_write_cb(struct gatt_db_attribute *attrib,
             send_notification(server, response, server->wifi_chara_handle);
             
             wifi_config_completed = true;
+            mainloop_add_timeout(2000, delayed_exit_cb, NULL, NULL);
         } else {
             printf("[DEBUG] Client not subscribed to notifications or disconnected, cannot send result\n");
         }
@@ -495,6 +503,7 @@ send_response:
             send_notification(server, response, server->wifi_chara_handle);
             
             wifi_config_completed = true;
+            mainloop_add_timeout(2000, delayed_exit_cb, NULL, NULL);
         } else {
             printf("[DEBUG] Client not subscribed to notifications or disconnected, cannot send result\n");
         }
