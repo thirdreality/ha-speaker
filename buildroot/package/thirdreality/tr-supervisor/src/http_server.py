@@ -142,46 +142,10 @@ class SupervisorHTTPServer:
                         self._handle_wifi_status()
                     elif path == "/api/system/info":
                         self._handle_system_info()
-                    elif path.startswith("/api/service/info"):
-                        # Support two ways to get service name:
-                        # 1. By path: /api/service/info/<service_name>
-                        # 2. By query param: /api/service/info?service=<service_name>
-                        path_parts = path.split('/')
-                        if len(path_parts) > 4 and path_parts[4]:  # By path
-                            service_name = path_parts[4]
-                            self._logger.info(f"Getting service info for {service_name} (via path)")
-                            self._handle_service_info(service_name)
-                        else:  # Try by query param
-                            service_name = query_params.get('service', [None])[0]
-                            if service_name:
-                                self._logger.info(f"Getting service info for {service_name} (via query param)")
-                                self._handle_service_info(service_name)
-                            else:
-                                # No service name provided, return info for all services
-                                self._logger.info("No service name provided, returning info for all services")
-                                self._handle_service_info(None)
-                    elif path == "/api/setting/info":
-                        self._handle_setting_info()
-                    elif path == "/api/health" or path == "/health":
-                        # Handle health check request
-                        self._handle_health_check()
-                    elif path.startswith('/api/task/info'):
-                        query_components = parse_qs(urlparse(self.path).query)
-                        task_type = query_components.get("task", [None])[0]
-
-                        if not task_type:
-                            self._set_headers(status_code=400)
-                            self.wfile.write(json.dumps({"success": False, "error": "Missing 'task' query parameter."}).encode())
-                            return
-
-                        if task_type not in ["zigbee", "thread", "setting"]:
-                            self._set_headers(status_code=400)
-                            self.wfile.write(json.dumps({"success": False, "error": f"Invalid task type: {task_type}"}).encode())
-                            return
-                        
-                        task_info = self._supervisor.task_manager.get_task_info(task_type)
-                        self._set_headers()
-                        self.wfile.write(json.dumps({"success": True, "task": task_type, "data": task_info}).encode())
+                    elif path == "/api/ota/status":
+                        self._handle_ota_status()
+                    elif path == "/api/ota/history":
+                        self._handle_ota_history()
                     else:
                         # Return 404 Not Found
                         self.send_response(404)
@@ -284,214 +248,38 @@ class SupervisorHTTPServer:
                 self._set_headers()
                 self.wfile.write(json.dumps(result).encode())
 
-            def _handle_service_info(self, service_name=None): 
-                """Handle service info request, can specify a particular service"""
-                # Define service config
-                service_configs = {
-                    "homeassistant_core": {
-                        "name": "Home Assistant",
-                        "services": [
-                            "home-assistant.service",
-                            "matter-server.service",
-                            "otbr-agent.service",
-                            "mosquitto.service",
-                            "zigbee2mqtt.service"
-                        ]
-                    },
-                    "openhab": {
-                        "name": "openhab",
-                        "services": [
-                            "openhab.service"
-                        ]
-                    },
-                }
-                
-                # If a service name is specified but does not exist, return 404
-                if service_name and service_name not in service_configs:
-                    self.send_response(404)
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"error": f"Service '{service_name}' not found"}).encode())
-                    return
-                
-                # Determine which services to process
-                services_to_process = [service_name] if service_name else service_configs.keys()
-                
-                # Result dict
-                result = {}
-                
-                # Process each service
-                for service_key in services_to_process:
-                    config = service_configs[service_key]
-                    service_result = {
-                        "name": config["name"]
-                    }
-                    
-                    # Check service status
-                    services_status = []
-                    for service in config["services"]:
-                        is_running = util.is_service_running(service)
-                        is_enabled = util.is_service_enabled(service)
-                        service_info = {
-                            "name": service,
-                            "running": is_running,
-                            "enabled": is_enabled
-                        }
-                        services_status.append(service_info)
-                    
-                    service_result["service"] = services_status
-                    result[service_key] = service_result
-                
-                self._set_headers()
-                self.wfile.write(json.dumps(result).encode())
-
-            def _handle_channel_info(self, query_params):
-                """Handle channel info request, return Zigbee and Thread channel information"""
+            def _handle_ota_status(self):
                 try:
-                    from supervisor.channel_manager import ChannelManager
-                    
-                    channel_manager = ChannelManager()
-                    
-                    # Check if specific channel type is requested
-                    channel_type = query_params.get('type', [None])[0]
-                    
-                    if channel_type:
-                        # Return specific channel type
-                        if channel_type not in ['zigbee', 'thread']:
-                            self.send_response(400)
-                            self.send_header('Content-type', 'application/json')
-                            self.end_headers()
-                            self.wfile.write(json.dumps({"error": f"Invalid channel type: {channel_type}. Must be 'zigbee' or 'thread'"}).encode())
-                            return
-                        
-                        result = channel_manager.get_channel_by_type(channel_type)
-                    else:
-                        # Return all channels
-                        result = channel_manager.get_all_channels()
+                    ota_state = self._supervisor.get_ota_state()
                     
                     self._set_headers()
-                    self.wfile.write(json.dumps(result).encode())
+                    self.wfile.write(json.dumps(ota_state).encode())
                     
                 except Exception as e:
-                    self._logger.error(f"Error getting channel info: {e}")
+                    self._logger.error(f"Error getting OTA status: {e}")
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "otaing": False,
+                        "ota_status": "error",
+                        "message": str(e)
+                    }).encode())
+
+            def _handle_ota_history(self):
+                try:
+                    history = self._supervisor.get_ota_history()
+                    
+                    self._set_headers()
+                    self.wfile.write(json.dumps(history).encode())
+
+                except Exception as e:
+                    self._logger.error(f"Error getting OTA history: {e}")
                     self.send_response(500)
                     self.send_header('Content-type', 'application/json')
                     self.end_headers()
                     self.wfile.write(json.dumps({"error": str(e)}).encode())
-            
-            def _handle_health_check(self):
-                """Handle health check request, return server status info"""
-                from .sysinfo import get_device_info
-                # Calculate server uptime
-                uptime_seconds = time.time() - self._supervisor.http_server.start_time
-                uptime_str = self._format_uptime(uptime_seconds)
-                
-                # Get system resource info
-                mem_info = self._get_memory_info()
-                cpu_load = self._get_cpu_load()
-                disk_usage = self._get_disk_usage()
-                
-                # Assemble health status response
-                health_status = {
-                    "status": "ok",
-                    "version": get_device_info().get("firmwareVersion", ""),
-                    "uptime": uptime_str,
-                    "uptime_seconds": int(uptime_seconds),
-                    "timestamp": int(time.time()),
-                    "resources": {
-                        "memory": mem_info,
-                        "cpu": cpu_load,
-                        "disk": disk_usage
-                    }
-                }
-                
-                # Return health status response
-                self._set_headers()
-                self.wfile.write(json.dumps(health_status).encode())
-            
-            def _format_uptime(self, seconds):
-                """Format uptime string"""
-                days, remainder = divmod(int(seconds), 86400)
-                hours, remainder = divmod(remainder, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                
-                if days > 0:
-                    return f"{days}d {hours}h {minutes}m {seconds}s"
-                elif hours > 0:
-                    return f"{hours}h {minutes}m {seconds}s"
-                elif minutes > 0:
-                    return f"{minutes}m {seconds}s"
-                else:
-                    return f"{seconds}s"
-            
-            def _get_memory_info(self):
-                """Get memory usage info"""
-                try:
-                    with open('/proc/meminfo', 'r') as f:
-                        mem_info = {}
-                        for line in f:
-                            if 'MemTotal' in line or 'MemFree' in line or 'MemAvailable' in line:
-                                key, value = line.split(':', 1)
-                                value = value.strip().split()[0]  # Remove unit, keep only number
-                                mem_info[key.strip()] = int(value)
-                        
-                        # Calculate memory usage percent
-                        if 'MemTotal' in mem_info and 'MemAvailable' in mem_info:
-                            used = mem_info['MemTotal'] - mem_info['MemAvailable']
-                            mem_info['UsedPercent'] = round(used / mem_info['MemTotal'] * 100, 1)
-                        
-                        return mem_info
-                except Exception as e:
-                    self._logger.error(f"Error getting memory info: {e}")
-                    return {"error": str(e)}
-            
-            def _get_cpu_load(self):
-                """Get CPU load"""
-                try:
-                    with open('/proc/loadavg', 'r') as f:
-                        load = f.read().strip().split()
-                        return {
-                            "load_1min": float(load[0]),
-                            "load_5min": float(load[1]),
-                            "load_15min": float(load[2])
-                        }
-                except Exception as e:
-                    self._logger.error(f"Error getting CPU load: {e}")
-                    return {"error": str(e)}
-            
-            def _get_disk_usage(self):
-                """Get disk usage info"""
-                try:
-                    # Use df command to get disk usage
-                    process = subprocess.run(['df', '-h', '/'], capture_output=True, text=True, check=False)
-                    if process.returncode == 0:
-                        lines = process.stdout.strip().split('\n')
-                        if len(lines) >= 2:  # At least header and data line
-                            parts = lines[1].split()
-                            if len(parts) >= 5:
-                                return {
-                                    "filesystem": parts[0],
-                                    "size": parts[1],
-                                    "used": parts[2],
-                                    "available": parts[3],
-                                    "use_percent": parts[4]
-                                }
-                    
-                    # If above method fails, try statvfs
-                    import os
-                    st = os.statvfs('/')
-                    total = st.f_blocks * st.f_frsize
-                    free = st.f_bfree * st.f_frsize
-                    used = total - free
-                    return {
-                        "total_bytes": total,
-                        "used_bytes": used,
-                        "free_bytes": free,
-                        "use_percent": round(used / total * 100, 1)
-                    }
-                except Exception as e:
-                    self._logger.error(f"Error getting disk usage: {e}")
-                    return {"error": str(e)}                
-            
+
             def _handle_sys_command(self, post_data):
                 """Handle system command request, use shared signature verification method"""
                 try:
@@ -553,94 +341,47 @@ class SupervisorHTTPServer:
                         self.wfile.write(json.dumps({"success": True}).encode())
                         threading.Timer(3.0, self._supervisor.perform_factory_reset).start()
 
-                    elif command == "stop_wifi_provision":
-                        # Directly call supervisor stop Wi-Fi provisioning method
-                        self._logger.info("HTTP Server: Received stop_wifi_provision command.")
-                        success = self._supervisor.finish_wifi_provision() # This method already runs in a thread
+                    elif command == "ota":
+                        if not param_dict:
+                            self._set_headers(status_code=400)
+                            self.wfile.write(json.dumps({
+                                "success": False, 
+                                "error": "Missing OTA parameters"
+                            }).encode())
+                            return
+                        
+                        required_fields = ['url', 'version', 'md5']
+                        for field in required_fields:
+                            if field not in param_dict:
+                                self._set_headers(status_code=400)
+                                self.wfile.write(json.dumps({
+                                    "success": False, 
+                                    "error": f"Missing required field: {field}"
+                                }).encode())
+                                return
+                        
+                        import uuid
+                        from datetime import datetime
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        unique_id = str(uuid.uuid4())[:8]
+                        ota_id = f"ota_{timestamp}_{unique_id}"
+                        
                         self._set_headers()
-                        # The success here indicates the command was received and initiated, 
-                        # not necessarily that Wi-Fi provisioning has fully stopped yet.
-                        self.wfile.write(json.dumps({"success": success, "message": "Wi-Fi provisioning stop initiated."}).encode())
+                        self.wfile.write(json.dumps({
+                            "success": True,
+                            "ota_id": ota_id
+                        }).encode())
+                        
+                        threading.Timer(1.0, lambda: self._supervisor.perform_ota_update(
+                            url=param_dict['url'],
+                            version=param_dict['version'],
+                            md5=param_dict['md5'],
+                            ota_id=ota_id
+                        )).start()
 
                 except Exception as e:
                     self._logger.error(f"Error processing system command: {str(e)}")
                     self._send_error(f"Error: {str(e)}")
-                    # Add detailed exception trace
-
-            def _handle_service_command(self, post_data):
-                """Handle service control command, use centralized signature verification logic"""
-                try:
-                    self._logger.info(f"Processing service command with data: {post_data}")
-                    # Parse POST params and signature
-                    params, signature, is_valid = self._parse_post_data(post_data)
-                    # Validate action param
-                    if 'action' not in params:
-                        self._send_error("action is required")
-                        return
-                    # Validate signature
-                    if not signature:
-                        self._send_error("Signature is required")
-                        return
-                    if not is_valid:
-                        self._logger.warning("Security verification failed: Invalid signature")
-                        self.send_response(401)
-                        self.send_header('Content-type', 'application/json')
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"error": "Unauthorized: Invalid signature"}).encode())
-                        return
-                    action = params['action']
-                    service_name = params.get('service')
-
-                    # If params has no service, try to parse from param_json
-                    if not service_name and 'param' in params:
-                        try:
-                            param_data_base64 = params['param']
-                            param_data_url_decoded = urllib.parse.unquote(param_data_base64)
-                            param_data_json = base64.b64decode(param_data_url_decoded).decode()
-                            self._logger.info(f"param_data (decoded): {param_data_json}")
-                            param_dict = json.loads(param_data_json)
-                            service_name = param_dict.get('service')
-                            self._logger.info(f"service (from param_data): {service_name}")
-                        except Exception as e:
-                            self._logger.error(f"Failed to parse param_data for service: {e}")
-
-                    self._logger.info(f"action: {action}")
-                    self._logger.info(f"service: {service_name}")
-
-                    if not service_name:
-                        self._send_error("Service name is required")
-                        return
-                    result = {"success": False}
-                    try:
-                        if action == "enable":
-                            self._logger.info(f"Enabling service: {service_name}")
-                            process = subprocess.run(["systemctl", "enable", service_name], capture_output=True, text=True)
-                            result = {"success": process.returncode == 0, "stdout": process.stdout, "stderr": process.stderr}
-                        elif action == "disable":
-                            self._logger.info(f"Disabling service: {service_name}")
-                            process = subprocess.run(["systemctl", "disable", service_name], capture_output=True, text=True)
-                            result = {"success": process.returncode == 0, "stdout": process.stdout, "stderr": process.stderr}
-                        elif action == "start":
-                            self._logger.info(f"Starting service: {service_name}")
-                            process = subprocess.run(["systemctl", "start", service_name], capture_output=True, text=True)
-                            result = {"success": process.returncode == 0, "stdout": process.stdout, "stderr": process.stderr}
-                        elif action == "stop":
-                            self._logger.info(f"Stopping service: {service_name}")
-                            process = subprocess.run(["systemctl", "stop", service_name], capture_output=True, text=True)
-                            result = {"success": process.returncode == 0, "stdout": process.stdout, "stderr": process.stderr}
-                        else:
-                            result = {"success": False, "error": f"Unknown action: {action}"}
-                        self._set_headers()
-                        self.wfile.write(json.dumps(result).encode())
-                    except Exception as e:
-                        self._logger.error(f"Error executing systemctl command: {e}")
-                        self._set_headers()
-                        self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode())
-                except Exception as e:
-                    self._logger.error(f"Error in _handle_service_command: {str(e)}")
-                    self._set_headers()
-                    self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode())
-
 
             def _verify_signature(self, params, signature):
                 """Verify request signature

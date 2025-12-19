@@ -1,7 +1,6 @@
 #!/bin/sh
 
 echo "Setting up ThirdReality environment..."
-dmesg -n 4
 
 mkdir -p /data/conf
 SOUND_CONF="/data/conf/sound.json"
@@ -13,19 +12,28 @@ DEVICE_CONF="/data/conf/device.json"
 if [ ! -s "$SOUND_CONF" ] || ! jq empty "$SOUND_CONF" 2>/dev/null; then
     cat > "$SOUND_CONF" <<EOF
 {
-    "volume": 30,
+    "volume": 60,
     "mic_gain": 30,
     "mic_mute": 1
 }
 EOF
 fi
 
-VOL=$(jq -r '.volume // 30' "$SOUND_CONF")
+VOL=$(jq -r '.volume // 60' "$SOUND_CONF")
 MIC_GAIN=$(jq -r '.mic_gain // 30' "$SOUND_CONF")
 MIC_MUTE=$(jq -r '.mic_mute // 1' "$SOUND_CONF")
 
 if [ ! -f "$DEVICE_CONF" ] || [ ! -s "$DEVICE_CONF" ] || ! jq empty "$DEVICE_CONF" 2>/dev/null; then
     cp "$DEVICE_CONF_BAK" "$DEVICE_CONF"
+fi
+
+CMDLINE_VERSION=$(cat /proc/cmdline | grep -o 'firmware_version=[^ ]*' | cut -d'=' -f2)
+JSON_VERSION=$(jq -r '.device.firmwareVersion // ""' "$DEVICE_CONF")
+if [ "$JSON_VERSION" != "$CMDLINE_VERSION" ]; then
+    jq --arg version "$CMDLINE_VERSION" \
+        '.device.firmwareVersion = $version' \
+        "$DEVICE_CONF" > "${DEVICE_CONF}.tmp" && mv "${DEVICE_CONF}.tmp" "$DEVICE_CONF"
+    echo "Version updated to: $CMDLINE_VERSION"
 fi
 
 MAC_ADDRESS=$(ifconfig wlan0 | grep "HWaddr" | awk '{print $5}')

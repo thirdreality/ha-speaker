@@ -137,7 +137,7 @@ static struct vad *get_vad(void)
 	p_vad = s_vad;
 
 	if (!p_vad) {
-		pr_debug("Not init vad\n");
+		// pr_debug("Not init vad\n");
 		return NULL;
 	}
 

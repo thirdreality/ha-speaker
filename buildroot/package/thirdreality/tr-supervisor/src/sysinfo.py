@@ -50,27 +50,6 @@ class ProcedureInfo:
         self.success = True
         self.percent= 0
 
-
-def get_memory_size():
-    """获取设备内存大小，单位为MB"""
-    try:
-        # 使用/proc/meminfo获取内存信息
-        with open('/proc/meminfo', 'r') as f:
-            meminfo = f.read()
-        
-        # 使用正则表达式提取MemTotal值
-        match = re.search(r'MemTotal:\s+(\d+)\s+kB', meminfo)
-        if match:
-            # 将kB转换为MB并返回
-            mem_kb = int(match.group(1))
-            mem_mb = mem_kb // 1024
-            return str(mem_mb)
-        else:
-            return ""
-    except Exception as e:
-        logging.error(f"Error getting memory size: {e}")
-        return ""
-
 class SystemInfoUpdater:
     def __init__(self, supervisor=None):
         self.supervisor = supervisor
@@ -131,31 +110,6 @@ class SystemInfoUpdater:
         final_fallback = "3RHUB-EMB"
         self.logger.warning(f"All attempts failed, using final fallback: {final_fallback}")
         return final_fallback
-    
-    def _cache_installed_services(self, sys_info):
-        """Cache installed services information at startup"""
-        from .utils import util
-        
-        self.logger.info("Caching installed services information...")
-        service_map = {
-            "home-assistant.service": "core",
-            "matter-server.service": "matter",
-            "zigbee2mqtt.service": "z2m",
-            "otbr-agent.service": "otbr",
-            "openhab.service": "hab",
-        }
-        
-        sys_info.installed_services = []
-        try:
-            for svc, val in service_map.items():
-                if util.is_service_present(svc):
-                    sys_info.installed_services.append(val)
-                    self.logger.debug(f"Service {svc} is installed")
-            
-            self.logger.info(f"Cached installed services: {', '.join(sys_info.installed_services) if sys_info.installed_services else 'none'}")
-        except Exception as e:
-            self.logger.error(f"Error caching installed services: {e}")
-            sys_info.installed_services = []
     
     def _check_auto_wifi_provision_needed(self):
         """Check if auto WiFi provision is needed after system startup is complete"""
