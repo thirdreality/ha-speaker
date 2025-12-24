@@ -266,15 +266,26 @@ class OpenWakeWordFeatures(TfLiteWakeWord):
 
         chunk_array = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
 
-        # Shift samples left
-        self.audio[: -len(chunk_array)] = self.audio[len(chunk_array) :]
+        # print(f"DEBUG: chunk_array len={len(chunk_array)}, self.audio len={len(self.audio)}")
 
-        # Add new samples to end
-        self.audio[-len(chunk_array) :] = chunk_array
-        self.new_audio_samples = min(
-            len(self.audio),
-            self.new_audio_samples + len(chunk_array),
-        )
+        if len(chunk_array) == 0:
+            return
+
+        if len(chunk_array) >= len(self.audio):
+            # print(f"DEBUG: Taking IF branch (large chunk)")
+            self.audio[:] = chunk_array[-len(self.audio):]
+            self.new_audio_samples = len(self.audio)
+        else:
+            # Shift samples left
+            # print(f"DEBUG: Taking ELSE branch (normal chunk)")
+            self.audio[: -len(chunk_array)] = self.audio[len(chunk_array) :]
+
+            # Add new samples to end
+            self.audio[-len(chunk_array) :] = chunk_array
+            self.new_audio_samples = min(
+                len(self.audio),
+                self.new_audio_samples + len(chunk_array),
+            )
 
         while self.new_audio_samples >= MEL_SAMPLES:
             audio_tensor = np.zeros(shape=(BATCH_SIZE, MEL_SAMPLES), dtype=np.float32)

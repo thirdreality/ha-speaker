@@ -1,0 +1,9 @@
+config BR2_PACKAGE_WEBRTC_NOISE_GAIN
+	bool "webrtc-noise-gain"
+	depends on BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_PYTHON_WEBRTC_AUDIO_PROCESSING
+	help
+	  Python wrapper for WebRTC Audio Processing for noise 
+	  suppression and automatic gain control.
+	  
+	  https://github.com/rhasspy/webrtc-noise-gain

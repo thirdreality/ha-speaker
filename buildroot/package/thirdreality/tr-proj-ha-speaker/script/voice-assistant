@@ -20,6 +20,7 @@ start_wyoming() {
     python3 -m wyoming_mic_external \
         --program 'arecord -r 16000 -c 2 -f S16_LE -t raw' \
         --rate 16000 --width 2 --channels 2 \
+        --samples-per-chunk 1024 \
         --uri "tcp://0.0.0.0:$MIC_PORT" &
     echo $! > $MIC_PIDFILE
 
@@ -30,6 +31,7 @@ start_wyoming() {
     echo $! > $SND_PIDFILE
 
     python3 -m wyoming_openwakeword \
+        --preload-model ok_nabu \
         --uri "tcp://0.0.0.0:$WAKEWORD_PORT" &
     echo $! > $WAKEWORD_PIDFILE
 
@@ -37,6 +39,8 @@ start_wyoming() {
 
     python3 -m wyoming_satellite --name "$SATELLITE_NAME" \
         --timeout-wav "/usr/share/thirdreality/audio/not_ready.wav" \
+        --mic-auto-gain 20 \
+        --mic-noise-suppression 2 \
         --uri "tcp://0.0.0.0:$SATELLITE_PORT" \
         --wake-word-name ok_nabu \
         --wake-uri "tcp://0.0.0.0:$WAKEWORD_PORT" \
