@@ -28,6 +28,43 @@ clean_config()
     wpa_cli -i wlan0 save_config > /dev/null
 }
 
+detect_wifi_type()
+{
+    local ssid="$1"
+    local flags=""
+
+    flags=$(wpa_cli -i wlan0 scan_results | grep "$ssid" | head -1 | awk '{print $4}')
+
+    if [ -z "$flags" ]; then
+        echo "unknown"
+        return
+    fi
+
+    case "$flags" in
+        *WPA3-SAE*WPA2-PSK*)
+            echo "wpa2-wpa3-mixed"
+            ;;
+        *WPA2-PSK*WPA-PSK*|*WPA-PSK*WPA2-PSK*)
+            echo "wpa-wpa2-mixed"
+            ;;
+        *WPA2-PSK*)
+            echo "wpa2-psk"
+            ;;
+        *WPA-PSK*)
+            echo "wpa-psk"
+            ;;
+        *WEP*)
+            echo "wep"
+            ;;
+        *ESS*)
+            echo "open"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
 wifi_connect()
 {
     local ssid="$1"
@@ -35,14 +72,48 @@ wifi_connect()
 
     echo "Connecting to SSID: $ssid"
 
+    local type=$(detect_wifi_type "$ssid")
+    echo "Detected WiFi type: $type"
+
     id=$(wpa_cli -i wlan0 add_network)
     wpa_cli -i wlan0 set_network "$id" ssid "\"$ssid\""
 
-    if [ "$psk" = "" ]; then
-        wpa_cli -i wlan0 set_network "$id" key_mgmt NONE
-    else
-        wpa_cli -i wlan0 set_network "$id" psk "\"$psk\""
-    fi
+    case "$type" in
+        open)
+            wpa_cli -i wlan0 set_network "$id" key_mgmt NONE
+            ;;
+        wep)
+            wpa_cli -i wlan0 set_network "$id" key_mgmt NONE
+            wpa_cli -i wlan0 set_network "$id" wep_key0 "\"$psk\""
+            wpa_cli -i wlan0 set_network "$id" wep_tx_keyidx 0
+            ;;
+        wpa2-wpa3-mixed)
+            wpa_cli -i wlan0 set_network "$id" psk "\"$psk\""
+            wpa_cli -i wlan0 set_network "$id" key_mgmt "WPA-PSK SAE"
+            wpa_cli -i wlan0 set_network "$id" ieee80211w 0
+            # wpa_cli -i wlan0 set_network "$id" ieee80211w 1
+            ;;
+        wpa-wpa2-mixed)
+            wpa_cli -i wlan0 set_network "$id" psk "\"$psk\""
+            wpa_cli -i wlan0 set_network "$id" key_mgmt WPA-PSK
+            ;;
+        wpa2-psk)
+            wpa_cli -i wlan0 set_network "$id" psk "\"$psk\""
+            wpa_cli -i wlan0 set_network "$id" key_mgmt WPA-PSK
+            ;;
+        wpa-psk)
+            wpa_cli -i wlan0 set_network "$id" psk "\"$psk\""
+            wpa_cli -i wlan0 set_network "$id" key_mgmt WPA-PSK
+            ;;
+        *)
+            if [ -z "$psk" ]; then
+                wpa_cli -i wlan0 set_network "$id" key_mgmt NONE
+            else
+                wpa_cli -i wlan0 set_network "$id" psk "\"$psk\""
+                wpa_cli -i wlan0 set_network "$id" key_mgmt WPA-PSK
+            fi
+            ;;
+    esac
 
     wpa_cli -i wlan0 enable_network "$id"
     wpa_cli -i wlan0 save_config
@@ -123,7 +194,7 @@ wifi_connect_success()
 {
     local ssid=$(wpa_cli status | awk -F= '/^ssid/ {print $2}')
     local ip=""
-    local max_retries=10
+    local max_retries=15
     local retry_count=0
 
     while [ $retry_count -lt $max_retries ]; do
