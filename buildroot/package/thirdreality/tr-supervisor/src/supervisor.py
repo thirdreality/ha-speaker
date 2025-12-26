@@ -436,7 +436,7 @@ class Supervisor:
                             current_mb = current_size / 1024 / 1024
                             
                             self._update_ota_state(
-                                progress=round(progress, 1),
+                                progress=int(progress),
                                 message=f'Downloading: {progress:.1f}% ({current_mb:.1f}/{total_mb:.1f} MB)'
                             )
                             
