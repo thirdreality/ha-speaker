@@ -2,58 +2,98 @@
 
 DEVICE_CONF="/data/conf/device.json"
 DEVICE_CONF_TMP="/tmp/tmp.json"
-CHECK_INTERVAL_CONNECTIVITY=5
-CHECK_INTERVAL_SSID=3
+DEVICE_CONF_LOCK="/tmp/device_conf.lock"
+
+INTERVAL_CONNECTED=60
+INTERVAL_DISCONNECTED=30
+INTERVAL_SSID=3
+
+WIFI_FAIL_THRESHOLD=2
+INTERNET_FAIL_THRESHOLD=3
+
 NETMONITOR_PIDFILE="/var/run/thirdreality/netmonitor.pid"
+
+CONNECTIVITY_CHECK_URL1="http://connectivitycheck.gstatic.com/generate_204"
+CONNECTIVITY_CHECK_URL2="http://captive.apple.com/hotspot-detect.html"
+
+ensure_directories()
+{
+    if [ ! -d "$(dirname "$NETMONITOR_PIDFILE")" ]; then
+        mkdir -p "$(dirname "$NETMONITOR_PIDFILE")"
+    fi
+}
+
+ensure_dns_config()
+{
+    local dns_server="8.8.8.8"
+    
+    if [ ! -f /etc/resolv.conf ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Warning: /etc/resolv.conf not found, creating..."
+        echo "nameserver $dns_server" > /etc/resolv.conf
+        return 0
+    fi
+    
+    if ! grep -q "nameserver $dns_server" /etc/resolv.conf; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Adding nameserver $dns_server to /etc/resolv.conf"
+        echo "nameserver $dns_server" >> /etc/resolv.conf
+    else
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] DNS config OK (nameserver $dns_server exists)"
+    fi
+}
 
 update_net_state()
 {
     local new_state="$1"
+    
+    if [ ! -f "$DEVICE_CONF" ]; then
+        echo "Warning: Device config file not found: $DEVICE_CONF"
+        return 1
+    fi
+    
     (
         flock -x 200
-        jq ".network.status = \"$new_state\"" "$DEVICE_CONF" > "$DEVICE_CONF_TMP" && mv "$DEVICE_CONF_TMP" "$DEVICE_CONF"
-        sync
-    ) 200>/tmp/device_conf.lock
+        if jq ".network.status = \"$new_state\"" "$DEVICE_CONF" > "$DEVICE_CONF_TMP"; then
+            mv "$DEVICE_CONF_TMP" "$DEVICE_CONF"
+            sync
+        else
+            echo "Error: Failed to update device config"
+            rm -f "$DEVICE_CONF_TMP"
+            return 1
+        fi
+    ) 200>"$DEVICE_CONF_LOCK"
 }
 
 netUpAction()
 {
-    CHECK_INTERVAL_CONNECTIVITY=60
-    netState="connected"
-
-    echo "++++++++++++network connected++++++++++++++"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Network connected"
     rm -f /tmp/net_disconnected
-
     update_net_state "connected"
 }
 
 netDownAction()
 {
-    CHECK_INTERVAL_CONNECTIVITY=30
-
-    echo "++++++++++++network disconnected++++++++++++"
+    local new_state
+    
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Network disconnected"
     touch /tmp/net_disconnected
-
+    
     if ssidCheck; then
-        # ssidCheck success
-        netState="connected_no_internet"
-        update_net_state "connected_no_internet"
+        new_state="connected_no_internet"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] WiFi connected but no internet"
     else
-        # ssidCheck failed
-        netState="disconnected"
-        update_net_state "disconnected"
+        new_state="disconnected"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] WiFi disconnected"
     fi
+    
+    update_net_state "$new_state"
 
-    # Sometimes, this can resolve issues with temporary network connectivity loss
-    if ! grep -q "nameserver 8.8.8.8" /etc/resolv.conf; then
-        echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-    fi
+    ensure_dns_config
+    return 0
 }
 
 ssidCheck()
 {
-    # 0: connected, 1: disconnected
-    if iw dev wlan0 link | grep -q "Not connected"; then
+    if iw dev wlan0 link 2>/dev/null | grep -q "Not connected"; then
         return 1
     else
         return 0
@@ -62,63 +102,101 @@ ssidCheck()
 
 connectivityCheck()
 {
-    # 0: success, 1: failed
-    if curl -Is --max-time 3 http://connectivitycheck.gstatic.com/generate_204 2>/dev/null | head -n 1 | grep -q "204"; then
+    # 0=success, 1=failed
+    if curl -Is --max-time 3 "$CONNECTIVITY_CHECK_URL1" 2>/dev/null | head -n 1 | grep -q "204"; then
         return 0
-    elif curl -Is --max-time 3 http://captive.apple.com/hotspot-detect.html 2>/dev/null | head -n 1 | grep -q "200"; then
-        return 0
-    else
-        return 1
     fi
+    
+    if curl -Is --max-time 3 "$CONNECTIVITY_CHECK_URL2" 2>/dev/null | head -n 1 | grep -q "200"; then
+        return 0
+    fi
+    
+    return 1
 }
 
 netCheckState()
 {
-    netState="disconnected"
+    local current_state="disconnected"
+    local check_interval="$INTERVAL_SSID"
+    local wifi_connected=false
+    local internet_connected=false
+    local wifi_fail_count=0
+    local internet_fail_count=0
+    
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Network monitor started"
 
     while true
     do
         if ssidCheck; then
-            # ssidCheck success
-            :
+            wifi_connected=true
+            wifi_fail_count=0
         else
-            # ssiCheck failed
-            if [ "$netState" = "connected" ] || [ "$netState" = "connected_no_internet" ]; then
-                netDownAction
-                netState="disconnected"
+            wifi_fail_count=$((wifi_fail_count + 1))
+            if [ $wifi_fail_count -ge $WIFI_FAIL_THRESHOLD ]; then
+                wifi_connected=false
             fi
+        fi
 
-            sleep "$CHECK_INTERVAL_SSID"
+        if [ "$wifi_connected" = false ]; then
+            if [ "$current_state" != "disconnected" ]; then
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] WiFi failed $wifi_fail_count times, marking as disconnected"
+                netDownAction
+                current_state="disconnected"
+            fi
+            internet_fail_count=0
+            check_interval="$INTERVAL_SSID"
+            sleep "$check_interval"
             continue
         fi
-
+        
         if connectivityCheck; then
-            # connectivityCheck success
-            if [ "$netState" = "disconnected" ] || [ "$netState" = "connected_no_internet" ]; then
-                netUpAction
-            fi
+            internet_connected=true
+            internet_fail_count=0
         else
-            # connectivityCheck failed
-            if [ "$netState" = "connected" ]; then
-                netDownAction
-            elif [ "$netState" = "disconnected" ]; then
-                netState="connected_no_internet"
-                update_net_state "connected_no_internet"
+            internet_fail_count=$((internet_fail_count + 1))
+            
+            if [ $internet_fail_count -ge $INTERNET_FAIL_THRESHOLD ]; then
+                internet_connected=false
             fi
         fi
-
-        sleep "$CHECK_INTERVAL_CONNECTIVITY"
+        
+        if [ "$internet_connected" = true ]; then
+            if [ "$current_state" != "connected" ]; then
+                netUpAction
+                current_state="connected"
+            fi
+            check_interval="$INTERVAL_CONNECTED"
+        else
+            if [ "$current_state" = "connected" ]; then
+                if [ $internet_fail_count -ge $INTERNET_FAIL_THRESHOLD ]; then
+                    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Internet failed $internet_fail_count times, marking as no internet"
+                    netDownAction
+                    current_state="connected_no_internet"
+                else
+                    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Internet check failed ($internet_fail_count/$INTERNET_FAIL_THRESHOLD)"
+                fi
+            elif [ "$current_state" = "disconnected" ]; then
+                update_net_state "connected_no_internet"
+                current_state="connected_no_internet"
+            fi
+            check_interval="$INTERVAL_DISCONNECTED"
+        fi
+        
+        sleep "$check_interval"
     done
+   
 }
 
 start()
 {
+    ensure_directories
+    
     if [ -f "$NETMONITOR_PIDFILE" ] && kill -0 "$(cat "$NETMONITOR_PIDFILE")" 2>/dev/null; then
-        echo "netcheck already running (PID: $(cat $NETMONITOR_PIDFILE))"
+        echo "netmonitor already running (PID: $(cat "$NETMONITOR_PIDFILE"))"
         exit 0
     fi
-
-    echo "Starting netcheck..."
+    
+    echo "Starting netmonitor..."
     netCheckState &
     echo $! > "$NETMONITOR_PIDFILE"
 }
@@ -126,14 +204,20 @@ start()
 stop()
 {
     if [ ! -f "$NETMONITOR_PIDFILE" ]; then
-        echo "netcheck not running."
+        echo "netmonitor not running"
         exit 0
     fi
-
-    if [ -f "$NETMONITOR_PIDFILE" ]; then
-        kill "$(cat "$NETMONITOR_PIDFILE")" 2>/dev/null
-        rm -f "$NETMONITOR_PIDFILE"
+    
+    local pid
+    pid="$(cat "$NETMONITOR_PIDFILE")"
+    
+    if kill "$pid" 2>/dev/null; then
+        echo "netmonitor stopped (PID: $pid)"
+    else
+        echo "Failed to stop netmonitor (PID: $pid may not exist)"
     fi
+    
+    rm -f "$NETMONITOR_PIDFILE"
 }
 
 restart()
