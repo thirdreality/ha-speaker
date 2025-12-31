@@ -1,0 +1,7 @@
+config BR2_PACKAGE_PYTHON_SOUNDCARD
+	bool "python-soundcard"
+	depends on BR2_PACKAGE_PYTHON3
+	help
+	  Pure Python cross-platform audio I/O library.
+	  
+	  https://github.com/bastibe/SoundCard

@@ -1,0 +1,9 @@
+config BR2_PACKAGE_PYTHON_MPV
+	bool "python-mpv"
+	depends on BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_MPV
+	help
+	help
+	  python-mpv is a ctypes-based python interface to the mpv media player
+	  
+	  https://github.com/jaseg/python-mpv

@@ -202,16 +202,16 @@ define PULSEAUDIO_USERS
 	pulse -1 pulse -1 * /var/run/pulse - audio,pulse-access
 endef
 
-define PULSEAUDIO_INSTALL_INIT_SYSV
-	$(INSTALL) -D -m 755 package/pulseaudio/S50pulseaudio \
-		$(TARGET_DIR)/etc/init.d/S50pulseaudio
-endef
-
 define PULSEAUDIO_INSTALL_INIT_SYSTEMD
 	$(INSTALL) -D -m 644 package/pulseaudio/pulseaudio.service \
 		$(TARGET_DIR)/usr/lib/systemd/system/pulseaudio.service
 endef
 
 endif
+
+define PULSEAUDIO_INSTALL_INIT_SYSV
+	$(INSTALL) -D -m 755 package/pulseaudio/S50pulseaudio \
+		$(TARGET_DIR)/etc/init.d/S50pulseaudio
+endef
 
 $(eval $(meson-package))

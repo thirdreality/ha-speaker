@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=62.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name        = "linux-voice-assistant"
+version     = "1.0.0"
+license     = {text = "Apache-2.0"}
+description = "Linux voice assistant for Home Assistant using the ESPHome protocol"
+readme      = "README.md"
+authors     = [
+    {name = "The Home Assistant Authors", email = "hello@home-assistant.io"}
+]
+keywords    = ["home", "assistant", "voice", "esphome", "linux"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Text Processing :: Linguistic",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+requires-python = ">=3.9.0"
+dependencies = [
+    "aioesphomeapi==42.7.0",
+    "soundcard<1",
+    "numpy>=2,<3",
+    "pymicro-wakeword>=2,<3",
+    "pyopen-wakeword>=1,<2",
+    "python-mpv>=1,<2",
+    "zeroconf<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "flake8",
+    "mypy",
+    "pylint",
+    "pytest",
+]
+
+[project.urls]
+"Source Code" = "http://github.com/OHF-Voice/linux-voice-assistant"
+
+[tool.setuptools]
+platforms = ["any"]
+zip-safe  = true
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["linux_voice_assistant"]
+exclude = ["tests", "tests.*"]

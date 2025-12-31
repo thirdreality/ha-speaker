@@ -1,0 +1,6 @@
+config BR2_PACKAGE_PYTHON_PYMICRO_WAKEWORD
+	bool "python-pymicro-wakeword"
+	depends on BR2_PACKAGE_PYTHON3
+	help
+	  Python library for microWakeWord models.
+	  https://github.com/OHF-Voice/pymicro-wakeword

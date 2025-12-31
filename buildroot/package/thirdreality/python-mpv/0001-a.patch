@@ -1,0 +1,29 @@
+diff --git a/mpv.py b/mpv.py
+index 1d3f469..c0a86df 100644
+--- a/mpv.py
++++ b/mpv.py
+@@ -68,12 +68,20 @@ else:
+     locale.setlocale(locale.LC_NUMERIC, 'C')
+ 
+     sofile = ctypes.util.find_library('mpv')
+-    if sofile is None:
+-        raise OSError("Cannot find libmpv in the usual places. Depending on your distro, you may try installing an mpv-devel or mpv-libs package. If you have libmpv around but this script can't find it, consult the documentation for ctypes.util.find_library which this script uses to look up the library filename.")
+-    backend = CDLL(sofile)
++    if sofile is not None:
++        backend = CDLL(sofile)
++    else:
++        # Fallback for embedded Linux systems where find_library may fail
++        for lib_name in ['libmpv.so.2', 'libmpv.so.1', 'libmpv.so']:
++            try:
++                backend = CDLL(lib_name)
++                break
++            except OSError:
++                continue
++        else:
++            raise OSError("Cannot find libmpv in the usual places. Depending on your distro, you may try installing an mpv-devel or mpv-libs package. If you have libmpv around but this script can't find it, consult the documentation for ctypes.util.find_library which this script uses to look up the library filename.")
+     fs_enc = sys.getfilesystemencoding()
+ 
+-
+ class ShutdownError(SystemError):
+     pass
+ 

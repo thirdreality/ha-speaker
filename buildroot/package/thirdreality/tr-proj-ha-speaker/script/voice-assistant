@@ -1,76 +1,36 @@
 #!/bin/sh
 
 PIDDIR=/var/run/thirdreality
-MIC_PIDFILE=$PIDDIR/mic.pid
-SND_PIDFILE=$PIDDIR/snd.pid
-WAKEWORD_PIDFILE=$PIDDIR/wakeword.pid
-SATELLITE_PIDFILE=$PIDDIR/satellite.pid
+VOICE_ASSISTANT_PIDFILE=$PIDDIR/voice-assistant.pid
 
 DEVICE_CONF="/data/conf/device.json"
 
-start_wyoming() {
+start_voice_assistant() {
     mkdir -p $PIDDIR
-
-    MIC_PORT=$(jq -r '.wyoming.micPort // "10600"' "$DEVICE_CONF")
-    SND_PORT=$(jq -r '.wyoming.sndPort // "10601"' "$DEVICE_CONF")
-    WAKEWORD_PORT=$(jq -r '.wyoming.wakewordPort // "10400"' "$DEVICE_CONF")
-    SATELLITE_PORT=$(jq -r '.wyoming.satellitePort // "10700"' "$DEVICE_CONF")
-    SATELLITE_NAME=$(jq -r '.device.name // "thirdreality-speaker"' "$DEVICE_CONF")
-
-    python3 -m wyoming_mic_external \
-        --program 'arecord -r 16000 -c 2 -f S16_LE -t raw' \
-        --rate 16000 --width 2 --channels 2 \
-        --samples-per-chunk 1024 \
-        --uri "tcp://0.0.0.0:$MIC_PORT" &
-    echo $! > $MIC_PIDFILE
-
-    python3 -m wyoming_snd_external \
-        --program 'aplay -D softvol -r 48000 -c 2 -f S16_LE -t raw' \
-        --rate 48000 --width 2 --channels 2 \
-        --uri "tcp://0.0.0.0:$SND_PORT" &
-    echo $! > $SND_PIDFILE
-
-    python3 -m wyoming_openwakeword \
-        --preload-model ok_nabu \
-        --uri "tcp://0.0.0.0:$WAKEWORD_PORT" &
-    echo $! > $WAKEWORD_PIDFILE
-
-    sleep 3
-
-    python3 -m wyoming_satellite --name "$SATELLITE_NAME" \
-        --timeout-wav "/usr/share/thirdreality/audio/not_ready.wav" \
-        --mic-auto-gain 20 \
-        --mic-noise-suppression 2 \
-        --uri "tcp://0.0.0.0:$SATELLITE_PORT" \
-        --wake-word-name ok_nabu \
-        --wake-uri "tcp://0.0.0.0:$WAKEWORD_PORT" \
-        --mic-uri "tcp://0.0.0.0:$MIC_PORT" \
-        --snd-uri "tcp://0.0.0.0:$SND_PORT" &
-    echo $! > $SATELLITE_PIDFILE
+    SPK_NAME=$(jq -r '.device.name // "thirdreality-speaker"' "$DEVICE_CONF")
+    python3 -m linux_voice_assistant --name "$SPK_NAME" --wake-model "okay_nabu" --debug &
+    echo $! > $VOICE_ASSISTANT_PIDFILE
 }
 
-stop_wyoming() {
-    [ -f $WAKEWORD_PIDFILE ] && kill "$(cat $WAKEWORD_PIDFILE)" 2>/dev/null && rm -f $WAKEWORD_PIDFILE
-    [ -f $SATELLITE_PIDFILE ] && kill "$(cat $SATELLITE_PIDFILE)" 2>/dev/null && rm -f $SATELLITE_PIDFILE
-    [ -f $MIC_PIDFILE ] && kill "$(cat $MIC_PIDFILE)" 2>/dev/null && rm -f $MIC_PIDFILE
-    [ -f $SND_PIDFILE ] && kill "$(cat $SND_PIDFILE)" 2>/dev/null && rm -f $SND_PIDFILE
+stop_voice_assistant() {
+    [ -f $VOICE_ASSISTANT_PIDFILE ] && kill "$(cat $VOICE_ASSISTANT_PIDFILE)" 2>/dev/null && rm -f $VOICE_ASSISTANT_PIDFILE
 }
 
 restart() {
-    stop_wyoming
+    stop_voice_assistant
     sleep 1
-    start_wyoming
+    start_voice_assistant
 }
 
 case "$1" in
     start)
-        start_wyoming
+        start_voice_assistant
     ;;
     stop)
-        stop_wyoming
+        stop_voice_assistant
     ;;
     restart)
         restart
     ;;
-    *) echo "Usage: $0 {netup|netdown|restart}" ;;
+    *) echo "Usage: $0 {start|stop|restart}" ;;
 esac

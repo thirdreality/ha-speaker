@@ -1,0 +1,27 @@
+From: Your Name <your.email@example.com>
+Date: Wed, 31 Dec 2025 12:00:00 +0000
+Subject: [PATCH] Fix quantization to use int8 instead of uint8
+
+The input_zero_point can be negative (e.g., -128), so we need to use
+int8 instead of uint8 for quantized features to avoid data loss.
+
+Signed-off-by: Your Name <your.email@example.com>
+---
+ pymicro_wakeword/microwakeword.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pymicro_wakeword/microwakeword.py b/pymicro_wakeword/microwakeword.py
+index 1234567..abcdefg 100644
+--- a/pymicro_wakeword/microwakeword.py
++++ b/pymicro_wakeword/microwakeword.py
+@@ -193,7 +193,7 @@ class MicroWakeWord(TfLiteWakeWord):
+         quant_features = np.round(
+             np.concatenate(self._features, axis=1) / self.input_scale
+             + self.input_zero_point
+-        ).astype(np.uint8)
++        ).astype(np.int8)
+ 
+         # Stride instead of rolling
+         self._features.clear()
+-- 
+2.34.1
