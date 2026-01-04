@@ -76,6 +76,7 @@ class ServerState:
     satellite: "Optional[VoiceSatelliteProtocol]" = None
     wake_words_changed: bool = False
     refractory_seconds: float = 2.0
+    loop: "Optional[object]" = None
 
     def save_preferences(self) -> None:
         """Save preferences as JSON."""

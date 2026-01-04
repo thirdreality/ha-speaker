@@ -3,12 +3,15 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 import threading
 import time
 from pathlib import Path
 from queue import Queue
 from typing import Dict, List, Optional, Set, Union
+import fcntl
+import subprocess
 
 import numpy as np
 import soundcard as sc
@@ -26,7 +29,26 @@ _MODULE_DIR = Path(__file__).parent
 _REPO_DIR = _MODULE_DIR.parent
 _WAKEWORDS_DIR = _REPO_DIR / "wakewords"
 _SOUNDS_DIR = _REPO_DIR / "sounds"
+SOUND_CONF = "/data/conf/sound.json"
+LOCK_FILE = "/tmp/sound_config.lock"
 
+
+class VolumeConfigLock:
+    def __init__(self, lock_file: str):
+        self.lock_file = lock_file
+        self.fd = None
+    
+    def __enter__(self):
+        os.makedirs(os.path.dirname(self.lock_file), exist_ok=True)
+        self.fd = open(self.lock_file, 'w')
+        fcntl.flock(self.fd.fileno(), fcntl.LOCK_EX)
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.fd:
+            fcntl.flock(self.fd.fileno(), fcntl.LOCK_UN)
+            self.fd.close()
+            self.fd = None
 
 # -----------------------------------------------------------------------------
 
@@ -209,6 +231,16 @@ async def main() -> None:
 
     assert stop_model is not None
 
+    initial_volume = 50
+    try:
+        if Path(SOUND_CONF).exists():
+            with open(SOUND_CONF, 'r') as f:
+                sound_config = json.load(f)
+                initial_volume = sound_config.get('volume', 50)
+                _LOGGER.info("Loaded initial volume from config: %d", initial_volume)
+    except Exception as e:
+        _LOGGER.warning("Failed to load sound config, using default volume: %s", e)
+
     state = ServerState(
         name=args.name,
         mac_address=get_mac(),
@@ -218,15 +250,32 @@ async def main() -> None:
         wake_words=wake_models,
         active_wake_words=active_wake_words,
         stop_word=stop_model,
-        music_player=MpvMediaPlayer(device=args.audio_output_device),
-        tts_player=MpvMediaPlayer(device=args.audio_output_device),
+        music_player=MpvMediaPlayer(
+            device=args.audio_output_device,
+            volume_callback=sync_volume_to_system
+        ),
+        tts_player=MpvMediaPlayer(
+            device=args.audio_output_device,
+            volume_callback=sync_volume_to_system
+        ),
         wakeup_sound=args.wakeup_sound,
         timer_finished_sound=args.timer_finished_sound,
         preferences=preferences,
         preferences_path=preferences_path,
         refractory_seconds=args.refractory_seconds,
         download_dir=args.download_dir,
+        loop=None,
     )
+
+    state.music_player.set_volume(initial_volume, from_external=True)
+    state.tts_player.set_volume(initial_volume, from_external=True)
+
+    volume_monitor_thread = threading.Thread(
+        target=monitor_volume_config,
+        args=(state, SOUND_CONF),
+        daemon=True,
+    )
+    volume_monitor_thread.start()
 
     process_audio_thread = threading.Thread(
         target=process_audio,
@@ -236,6 +285,7 @@ async def main() -> None:
     process_audio_thread.start()
 
     loop = asyncio.get_running_loop()
+    state.loop = loop
     server = await loop.create_server(
         lambda: VoiceSatelliteProtocol(state), host=args.host, port=args.port
     )
@@ -259,6 +309,86 @@ async def main() -> None:
 
 # -----------------------------------------------------------------------------
 
+def sync_volume_to_system(volume: int):
+    try:
+        subprocess.run(
+            ["amixer", "cset", "numid=34", f"{volume}%"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=1
+        )
+        
+        with VolumeConfigLock(LOCK_FILE):
+            if os.path.exists(SOUND_CONF):
+                with open(SOUND_CONF, 'r') as f:
+                    config = json.load(f)
+            else:
+                config = {"volume": 50, "mic_gain": 30, "mic_mute": 1}
+            
+            config['volume'] = volume
+            
+            tmpfile = f"{SOUND_CONF}.tmp"
+            with open(tmpfile, 'w') as f:
+                json.dump(config, f, indent=2)
+            os.rename(tmpfile, SOUND_CONF)
+            os.sync()
+        
+        _LOGGER.debug("Synced volume to system: %d", volume)
+    except subprocess.TimeoutExpired:
+        _LOGGER.error("amixer command timeout")
+    except Exception as e:
+        _LOGGER.error("Failed to sync volume to system: %s", e)
+
+def monitor_volume_config(state: ServerState, config_path: str):
+    last_mtime = 0
+    last_volume = -1
+    
+    _LOGGER.debug("Starting volume config monitor: %s", config_path)
+    
+    while state.media_player_entity is None:
+        time.sleep(0.1)
+    
+    _LOGGER.debug("media_player_entity initialized, starting volume sync")
+    
+    try:
+        if os.path.exists(config_path):
+            with VolumeConfigLock(LOCK_FILE):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    initial_vol = config.get('volume', 50)
+            
+            last_volume = initial_vol
+            state.media_player_entity.update_volume_from_external(initial_vol)
+            _LOGGER.info("Initial volume synced to HA: %d", initial_vol)
+    except Exception as e:
+        _LOGGER.error("Failed to sync initial config: %s", e)
+    
+    while True:
+        try:
+            if os.path.exists(config_path):
+                mtime = os.path.getmtime(config_path)
+                if mtime > last_mtime:
+                    last_mtime = mtime
+                    
+                    with VolumeConfigLock(LOCK_FILE):
+                        with open(config_path, 'r') as f:
+                            config = json.load(f)
+                            volume = config.get('volume', 50)
+                    
+                    if volume != last_volume:
+                        last_volume = volume
+                        state.music_player.set_volume(volume, from_external=True)
+                        state.tts_player.set_volume(volume, from_external=True)
+                        state.media_player_entity.update_volume_from_external(volume)
+                        _LOGGER.info("Volume updated from config: %d", volume)
+                    
+        except json.JSONDecodeError:
+            pass
+        except Exception as e:
+            _LOGGER.error("Error monitoring volume config: %s", e)
+        
+        time.sleep(0.3)
 
 def process_audio(state: ServerState, mic, block_size: int):
     """Process audio chunks from the microphone."""

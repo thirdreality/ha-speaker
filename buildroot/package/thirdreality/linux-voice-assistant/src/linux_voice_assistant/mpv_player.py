@@ -11,13 +11,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class MpvMediaPlayer:
-    def __init__(self, device: Optional[str] = None) -> None:
+    def __init__(
+        self, 
+        device: Optional[str] = None,
+        volume_callback: Optional[Callable[[int], None]] = None
+    ) -> None:
         self.player = MPV()
 
         if device:
             self.player["audio-device"] = device
 
         self.is_playing = False
+        self.volume_callback = volume_callback
 
         self._playlist: List[str] = []
         self._done_callback: Optional[Callable[[], None]] = None
@@ -25,6 +30,7 @@ class MpvMediaPlayer:
 
         self._duck_volume: int = 50
         self._unduck_volume: int = 100
+        self._ignore_callback = False
 
         self.player.event_callback("end-file")(self._on_end_file)
 
@@ -62,17 +68,32 @@ class MpvMediaPlayer:
         self._playlist.clear()
 
     def duck(self) -> None:
+        self._ignore_callback = True
         self.player.volume = self._duck_volume
+        self._ignore_callback = False
 
     def unduck(self) -> None:
+        self._ignore_callback = True
         self.player.volume = self._unduck_volume
+        self._ignore_callback = False
 
-    def set_volume(self, volume: int) -> None:
+    def set_volume(self, volume: int, from_external: bool = False) -> None:
         volume = max(0, min(100, volume))
+        
+        if from_external:
+            self._ignore_callback = True
+        
         self.player.volume = volume
-
         self._unduck_volume = volume
         self._duck_volume = volume // 2
+
+        if not from_external and self.volume_callback and not self._ignore_callback:
+            try:
+                self.volume_callback(volume)
+            except Exception as e:
+                _LOGGER.error("Error in volume callback: %s", e)
+        
+        self._ignore_callback = False
 
     def _on_end_file(self, event) -> None:
         if self._playlist:

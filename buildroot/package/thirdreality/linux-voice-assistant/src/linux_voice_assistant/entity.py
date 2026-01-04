@@ -92,6 +92,27 @@ class MediaPlayerEntity(ESPHomeEntity):
 
         yield self._update_state(MediaPlayerState.PLAYING)
 
+    def update_volume_from_external(self, volume_percent: int) -> None:
+        import asyncio
+        
+        self.volume = volume_percent / 100.0
+        
+        loop = None
+        if hasattr(self.server, 'loop'):
+            loop = self.server.loop
+        
+        if loop is None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+        
+        if loop and loop.is_running():
+            loop.call_soon_threadsafe(
+                self.server.send_messages,
+                [self._get_state_message()]
+            )
+
     def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
         if isinstance(msg, MediaPlayerCommandRequest) and (msg.key == self.key):
             if msg.has_media_url:

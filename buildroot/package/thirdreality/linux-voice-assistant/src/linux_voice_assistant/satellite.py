@@ -54,6 +54,7 @@ class VoiceSatelliteProtocol(APIServer):
 
         self.state = state
         self.state.satellite = self
+        self.loop = state.loop
 
         if self.state.media_player_entity is None:
             self.state.media_player_entity = MediaPlayerEntity(

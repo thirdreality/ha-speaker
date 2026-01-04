@@ -12,14 +12,14 @@ DEVICE_CONF="/data/conf/device.json"
 if [ ! -s "$SOUND_CONF" ] || ! jq empty "$SOUND_CONF" 2>/dev/null; then
     cat > "$SOUND_CONF" <<EOF
 {
-    "volume": 60,
+    "volume": 50,
     "mic_gain": 30,
     "mic_mute": 1
 }
 EOF
 fi
 
-VOL=$(jq -r '.volume // 60' "$SOUND_CONF")
+VOL=$(jq -r '.volume // 50' "$SOUND_CONF")
 MIC_GAIN=$(jq -r '.mic_gain // 30' "$SOUND_CONF")
 MIC_MUTE=$(jq -r '.mic_mute // 1' "$SOUND_CONF")
 
