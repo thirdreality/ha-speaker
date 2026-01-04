@@ -87,23 +87,17 @@ Download the 3R-Installer app from the app store, then select Add V&M Assistant 
   <img src="doc/images/cloud.png" alt="cloud" width="400">
 </div>
 
-3. Add the Wyoming Protocol integration in Home Assistant.Set the Host to the speaker’s IP address (which can be found in the 3R-Installer app), and set the port to 10700
+3. Add the ESPHome integration in Home Assistant.Set the Host to the speaker’s IP address (which can be found in the 3R-Installer app), and set the port to 6053
 
-   Settings -> Devices & services -> Add integration -> Wyoming Protocol
+   Settings -> Devices & services -> Add integration -> ESPHome
 
-<div align="left">
-  <img src="doc/images/add-satellite.png" alt="add-satellite" width="400">
-</div>
+<p>
+  <img src="doc/images/add-esphome.png" width="20%" height="250">
+  <img src="doc/images/esphome-setup1.png" width="20%" height="250">
+  <img src="doc/images/esphome-setup2.png" width="20%" height="250">
+  <img src="doc/images/esphome-setup3.png" width="20%" height="250">
+</p>
 
-Please select the appropriate option here based on the choice you made in step 1.
-<div align="left">
-  <img src="doc/images/voice-assistant-1.png" alt="voice-assistant-setting-1" width="400">
-</div>
-
-Please select the assistant you created in step 2.
-<div align="left">
-  <img src="doc/images/voice-assistant-2.png" alt="voice-assistant-setting-2" width="400">
-</div>
 
 Once completed, you can use “OK Nabu” to wake the speaker and start a conversation.
 
