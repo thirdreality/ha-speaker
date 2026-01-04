@@ -74,6 +74,47 @@ class VoiceSatelliteProtocol(APIServer):
         self._timer_finished = False
         self._external_wake_words: Dict[str, VoiceAssistantExternalWakeWord] = {}
 
+    async def _led_show(self, state: str) -> None:
+        """Show an LED animation."""
+        _LOGGER.info(f"[led_show] State changed to: {state}")
+        animations = {
+            "listening": "/usr/share/thirdreality/animation/active-waking.animation",
+            "thinking": "/usr/share/thirdreality/animation/active-thinking.animation",
+            "speaking": "/usr/share/thirdreality/animation/active-talking.animation",
+            "idle": "/usr/share/thirdreality/animation/active-ending.animation",
+            "error": "/usr/share/thirdreality/animation/active-ending.animation",
+        }
+        animation = animations.get(state)
+        if not animation:
+            _LOGGER.debug(f"Unknown LED state: {state}")
+            return
+        try:
+            import subprocess
+            cmd = [
+                "dbus-send",
+                "--system",
+                "--type=signal",
+                "/com/3r/EventBus",
+                "com._3reality.EventBus.LedShow",
+                "boolean:false",
+                f"array:string:'{animation}'"
+            ]
+            result = subprocess.run(
+                " ".join(cmd),
+                shell=True,
+                timeout=1,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                _LOGGER.debug(f"[led_show] State: {state} -> {animation}")
+            else:
+                _LOGGER.debug(f"[led_show] Failed to execute dbus command: {result.stderr}")
+        except subprocess.TimeoutExpired:
+            _LOGGER.warning(f"[led_show] Dbus command timeout for state: {state}")
+        except Exception as e:
+            _LOGGER.debug(f"[led_show] Failed to control LED: {e}")
+
     def handle_voice_event(
         self, event_type: VoiceAssistantEventType, data: Dict[str, str]
     ) -> None:
@@ -88,6 +129,7 @@ class VoiceSatelliteProtocol(APIServer):
             VoiceAssistantEventType.VOICE_ASSISTANT_STT_END,
         ):
             self._is_streaming_audio = False
+            self.loop.create_task(self._led_show("thinking"))
         elif event_type == VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_PROGRESS:
             if data.get("tts_start_streaming") == "1":
                 # Start streaming early
@@ -104,8 +146,10 @@ class VoiceSatelliteProtocol(APIServer):
                 self._tts_finished()
 
             self._tts_played = False
-
         # TODO: handle error
+        elif event_type == VoiceAssistantEventType.VOICE_ASSISTANT_ERROR:
+            self.loop.create_task(self._led_show("error"))
+
 
     def handle_timer_event(
         self,
@@ -262,6 +306,7 @@ class VoiceSatelliteProtocol(APIServer):
 
         wake_word_phrase = wake_word.wake_word
         _LOGGER.debug("Detected wake word: %s", wake_word_phrase)
+        self.loop.create_task(self._led_show("listening"))
         self.send_messages(
             [VoiceAssistantRequest(start=True, wake_word_phrase=wake_word_phrase)]
         )
@@ -287,6 +332,7 @@ class VoiceSatelliteProtocol(APIServer):
         self._tts_played = True
         _LOGGER.debug("Playing TTS response: %s", self._tts_url)
 
+        self.loop.create_task(self._led_show("speaking"))
         self.state.active_wake_words.add(self.state.stop_word.id)
         self.state.tts_player.play(self._tts_url, done_callback=self._tts_finished)
 
@@ -308,6 +354,7 @@ class VoiceSatelliteProtocol(APIServer):
             _LOGGER.debug("Continuing conversation")
         else:
             self.unduck()
+            self.loop.create_task(self._led_show("idle"))
 
         _LOGGER.debug("TTS response finished")
 
