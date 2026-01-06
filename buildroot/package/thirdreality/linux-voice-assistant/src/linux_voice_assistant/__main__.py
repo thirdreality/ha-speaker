@@ -51,9 +51,23 @@ class VolumeConfigLock:
             self.fd = None
 
 # -----------------------------------------------------------------------------
+# TODO
+def thread_exception_handler(args):
+    """Handle uncaught exceptions in threads and exit program."""
+    _LOGGER.critical(
+        "FATAL: Uncaught exception in thread '%s'",
+        args.thread.name
+    )
+    _LOGGER.critical("Exception type: %s", args.exc_type.__name__)
+    _LOGGER.critical("Exception value: %s", args.exc_value)
+    _LOGGER.critical("Exiting program to allow restart by supervisor...")
+
+    os._exit(1)
 
 
 async def main() -> None:
+    threading.excepthook = thread_exception_handler
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", required=True)
     parser.add_argument(

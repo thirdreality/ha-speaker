@@ -1,3 +1,12 @@
+From d4da1b365262603f8ddd94b3d3ada782e30533f2 Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Tue, 6 Jan 2026 11:00:23 +0800
+Subject: [PATCH] fix build error
+
+---
+ mpv.py | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
 diff --git a/mpv.py b/mpv.py
 index 1d3f469..c0a86df 100644
 --- a/mpv.py
@@ -27,3 +36,6 @@ index 1d3f469..c0a86df 100644
  class ShutdownError(SystemError):
      pass
  
+-- 
+2.40.1
+

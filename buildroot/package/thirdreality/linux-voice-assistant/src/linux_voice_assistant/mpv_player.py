@@ -16,7 +16,24 @@ class MpvMediaPlayer:
         device: Optional[str] = None,
         volume_callback: Optional[Callable[[int], None]] = None
     ) -> None:
-        self.player = MPV()
+        self.player = MPV(
+            cache=True,
+            demuxer_max_bytes='20M',
+            demuxer_max_back_bytes='5M',
+            cache_secs=10,
+            stream_buffer_size='512k',
+            cache_on_disk=False,
+            keep_open=False,
+            audio_buffer=0.5,
+            demuxer_readahead_secs=5,
+            hr_seek='no',
+            video=False,
+            msg_level='all=error',
+            audio_samplerate=48000,
+            audio_channels='stereo',
+            ao_null_untimed='yes',
+            audio_wait_open=0.5,
+        )
 
         if device:
             self.player["audio-device"] = device
