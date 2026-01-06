@@ -12,7 +12,7 @@ start_service()
     NETWORK_STATUS=$(jq -r '.network.status // "disconnected"' "$DEVICE_CONF" 2>/dev/null)
     if [ "$NETWORK_STATUS" != "connected" ]; then
         /etc/init.d/S44bluetooth up
-        aplay -Dsoftvol /usr/share/thirdreality/audio/setup_mode.wav &
+        paplay /usr/share/thirdreality/audio/setup_mode.wav &
     fi
 
     python3 -m supervisor 2>/dev/null &

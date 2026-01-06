@@ -325,14 +325,6 @@ async def main() -> None:
 
 def sync_volume_to_system(volume: int):
     try:
-        subprocess.run(
-            ["amixer", "cset", "numid=34", f"{volume}%"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=1
-        )
-        
         with VolumeConfigLock(LOCK_FILE):
             if os.path.exists(SOUND_CONF):
                 with open(SOUND_CONF, 'r') as f:

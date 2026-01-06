@@ -63,7 +63,7 @@ do_volume_change() {
         vol=0
     fi
 
-    amixer cset numid=34 "$vol"% > /dev/null 2>&1
+    pactl set-sink-volume @DEFAULT_SINK@ "$vol"% > /dev/null 2>&1
 
     echo "Volume $action (x${count}): $vol%"
 
@@ -84,7 +84,7 @@ factory_reset() {
     else
         touch /tmp/factory_reset
     fi
-    aplay -Dsoftvol -c2 /usr/share/thirdreality/audio/factory_reset.wav &
+    paplay /usr/share/thirdreality/audio/factory_reset.wav &
     echo "factory resetting..."
     dbus-send --system --type=signal /com/3r/EventBus com._3reality.EventBus.LedShow boolean:false array:string:'/usr/share/thirdreality/animation/ntf_incoming.animation'
 

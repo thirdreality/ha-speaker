@@ -55,11 +55,11 @@ if [ "$CURRENT_MAC" != "$MAC_ADDRESS" ] || [ "$CURRENT_NAME" != "$DEVICE_NAME" ]
     fi
 fi
 
-head -c 38400 /dev/zero | aplay -D softvol -t raw -f S32_LE -c2 -r48000 > /dev/null 2>&1
+# head -c 38400 /dev/zero | aplay -D softvol -t raw -f S32_LE -c2 -r48000 > /dev/null 2>&1
 # set mic gain
 amixer cset numid=7 "$MIC_GAIN"% > /dev/null 2>&1
 # set volume
-amixer cset numid=34 "$VOL"% > /dev/null 2>&1
+pactl set-sink-volume @DEFAULT_SINK@ "$VOL"% > /dev/null 2>&1
 # enable speaker
 if [ ! -d "/sys/class/gpio/gpio414" ]; then
     echo 414 > /sys/class/gpio/export
