@@ -4,11 +4,14 @@
 #
 ################################################################################
 
-SNAPCAST_VERSION = v0.29.0
+SNAPCAST_VERSION = v0.34.0
 SNAPCAST_SITE = $(call github,badaix,snapcast,$(SNAPCAST_VERSION))
-SNAPCAST_DEPENDENCIES = libogg alsa-lib avahi # libstdcpp libatomic libflac libvorbisidec
+SNAPCAST_DEPENDENCIES = libogg alsa-lib avahi pulseaudio # libstdcpp libatomic libflac libvorbisidec
 SNAPCAST_LICENSE = GPL-3.0+
 SNAPCAST_LICENSE_FILES = LICENSE
+
+# 添加PulseAudio支持配置选项
+SNAPCAST_CONF_OPTS += -DBUILD_WITH_PULSE=ON
 
 define SNAPCLIENT_INSTALL_CONFIG
 	mkdir -p $(TARGET_DIR)/etc/default

@@ -80,4 +80,7 @@ sleep 0.2
 sleep 0.5
 dbus-send --system --type=signal /com/3r/EventBus com._3reality.EventBus.LedShow boolean:false array:string:'/usr/share/thirdreality/animation/none.animation'
 
+SPK_NAME=$(jq -r '.device.name // "3RSPK-DEFAULT"' "$DEVICE_CONF")
+hostname "$SPK_NAME"
+
 sync
