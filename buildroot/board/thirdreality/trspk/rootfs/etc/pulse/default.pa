@@ -43,10 +43,10 @@ load-module module-switch-on-port-available
 #load-module module-pipe-sink
 
 ### Automatically load driver modules depending on the hardware available
-.ifexists module-detect.so
+#.ifexists module-detect.so
 ### Use the static hardware detection module (for systems that lack udev support)
-load-module module-detect
-.endif
+#load-module module-detect
+#.endif
 
 ### Automatically connect sink and source if JACK server is present
 .ifexists module-jackdbus-detect.so
@@ -89,7 +89,7 @@ load-module module-always-sink
 load-module module-intended-roles
 
 ### Automatically suspend sinks/sources that become idle for too long
-load-module module-suspend-on-idle
+#load-module module-suspend-on-idle timeout=0
 
 ### If autoexit on idle is enabled we want to make sure we only quit
 ### when no local session needs us anymore.

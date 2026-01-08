@@ -4,17 +4,6 @@ PIDDIR=/var/run/thirdreality
 VOICE_ASSISTANT_PIDFILE=$PIDDIR/voice-assistant.pid
 DEVICE_CONF="/data/conf/device.json"
 
-MEMORY_THRESHOLD=15
-
-check_memory() {
-    FREE_MEM=$(free -m | awk 'NR==2 {print $4}')
-    
-    if [ -n "$FREE_MEM" ] && [ "$FREE_MEM" -lt "$MEMORY_THRESHOLD" ]; then
-        sync
-        echo 1 > /proc/sys/vm/drop_caches
-    fi
-}
-
 start_voice_assistant_process() {
     if [ -f $VOICE_ASSISTANT_PIDFILE ]; then
         PID=$(cat $VOICE_ASSISTANT_PIDFILE)
@@ -24,6 +13,8 @@ start_voice_assistant_process() {
         rm -f $VOICE_ASSISTANT_PIDFILE
     fi
     
+    sleep 5
+
     SPK_NAME=$(jq -r '.device.name // "thirdreality-speaker"' "$DEVICE_CONF")
     python3 -m linux_voice_assistant --name "$SPK_NAME" --wake-model "okay_nabu" --debug &
     echo $! > $VOICE_ASSISTANT_PIDFILE
@@ -46,11 +37,9 @@ start() {
             start_voice_assistant_process
             sleep 5
         fi
-        
-        check_memory
+
         sleep 10
     done
-
 }
 
 stop() {

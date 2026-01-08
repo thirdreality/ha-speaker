@@ -48,10 +48,18 @@ class AvailableWakeWord:
 
         raise ValueError(f"Unexpected wake word type: {self.type}")
 
+@dataclass
+class PlaybackState:
+    url: Optional[str] = None
+    playlist: List[str] = field(default_factory=list)
+    is_playing: bool = False
+    volume: int = 50
+    timestamp: float = 0.0
 
 @dataclass
 class Preferences:
     active_wake_words: List[str] = field(default_factory=list)
+    last_playback: Optional[PlaybackState] = None
 
 
 @dataclass

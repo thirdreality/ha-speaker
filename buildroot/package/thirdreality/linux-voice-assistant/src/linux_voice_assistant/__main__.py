@@ -12,6 +12,7 @@ from queue import Queue
 from typing import Dict, List, Optional, Set, Union
 import fcntl
 import subprocess
+import signal
 
 import numpy as np
 import soundcard as sc
@@ -30,6 +31,7 @@ _REPO_DIR = _MODULE_DIR.parent
 _WAKEWORDS_DIR = _REPO_DIR / "wakewords"
 _SOUNDS_DIR = _REPO_DIR / "sounds"
 SOUND_CONF = "/data/conf/sound.json"
+PLAYBACK_STATE_FILE = "/data/conf/playback_state.json"
 LOCK_FILE = "/tmp/sound_config.lock"
 
 
@@ -151,7 +153,11 @@ async def main() -> None:
             print(speaker["name"] + ":", speaker["description"])
         return
 
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format='%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
     _LOGGER.debug(args)
 
     args.download_dir = Path(args.download_dir)
@@ -255,6 +261,11 @@ async def main() -> None:
     except Exception as e:
         _LOGGER.warning("Failed to load sound config, using default volume: %s", e)
 
+    saved_playback = load_playback_state()
+    
+    def on_playback_state_change(url: Optional[str], playlist: List[str]):
+        save_playback_state(state, url, playlist)
+
     state = ServerState(
         name=args.name,
         mac_address=get_mac(),
@@ -266,7 +277,8 @@ async def main() -> None:
         stop_word=stop_model,
         music_player=MpvMediaPlayer(
             device=args.audio_output_device,
-            volume_callback=sync_volume_to_system
+            volume_callback=sync_volume_to_system,
+            state_callback=on_playback_state_change
         ),
         tts_player=MpvMediaPlayer(
             device=args.audio_output_device,
@@ -281,6 +293,10 @@ async def main() -> None:
         loop=None,
     )
 
+    graceful_shutdown.state = state
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+    signal.signal(signal.SIGINT, graceful_shutdown)
+
     state.music_player.set_volume(initial_volume, from_external=True)
     state.tts_player.set_volume(initial_volume, from_external=True)
 
@@ -290,6 +306,24 @@ async def main() -> None:
         daemon=True,
     )
     volume_monitor_thread.start()
+
+    memory_monitor_thread = threading.Thread(
+        target=monitor_memory_and_restart,
+        args=(state, 10),
+        daemon=True,
+        name="MemoryMonitor"
+    )
+    memory_monitor_thread.start()
+    _LOGGER.info("Memory monitor thread started")
+
+    # health_monitor_thread = threading.Thread(
+    #     target=monitor_playback_health,
+    #     args=(state,),
+    #     daemon=True,
+    #     name="HealthMonitor"
+    # )
+    # health_monitor_thread.start()
+    # _LOGGER.info("Playback health monitor thread started")
 
     process_audio_thread = threading.Thread(
         target=process_audio,
@@ -308,6 +342,12 @@ async def main() -> None:
     discovery = HomeAssistantZeroconf(port=args.port, name=args.name)
     await discovery.register_server()
 
+    if saved_playback and saved_playback.get('is_playing'):
+        url = saved_playback.get('url')
+        if url:
+            _LOGGER.info("Restoring playback: %s", url)
+            loop.call_later(2.0, restore_playback, state, saved_playback)
+
     try:
         async with server:
             _LOGGER.info("Server started (host=%s, port=%s)", args.host, args.port)
@@ -322,8 +362,122 @@ async def main() -> None:
 
 
 # -----------------------------------------------------------------------------
+# def monitor_playback_health(state: ServerState):
+#     import time
+
+#     _LOGGER.info("Starting playback health monitor")
+#     time.sleep(30)
+
+#     while True:
+#         try:
+#             time.sleep(20)
+
+#             if state.music_player:
+#                 current_state = state.music_player.get_current_state()
+
+#                 try:
+#                     is_idle = state.music_player.player.idle_active if hasattr(
+#                         state.music_player.player, 'idle_active'
+#                     ) else None
+                    
+#                     is_paused = state.music_player.player.pause if hasattr(
+#                         state.music_player.player, 'pause'
+#                     ) else None
+
+#                     _LOGGER.debug(
+#                         f"Health check: "
+#                         f"is_playing={current_state['is_playing']}, "
+#                         f"url={current_state['url']}, "
+#                         f"mpv_idle={is_idle}, "
+#                         f"mpv_paused={is_paused}"
+#                     )
+
+#                     if current_state['is_playing'] and is_idle:
+#                         _LOGGER.error(
+#                             "⚠⚠⚠ INCONSISTENT STATE DETECTED! "
+#                             "is_playing=True but MPV is idle. "
+#                             f"URL: {current_state['url']}"
+#                         )
+
+#                 except Exception as e:
+#                     _LOGGER.error(f"Error in health check: {e}")
+
+#         except Exception as e:
+#             _LOGGER.error(f"Error in playback health monitor: {e}")
+
+#         time.sleep(20)
+
+def restore_playback(state: ServerState, playback_state: dict):
+    """Restore playback from saved state."""
+    try:
+        url = playback_state.get('url')
+        playlist = playback_state.get('playlist', [])
+        
+        if url:
+            full_playlist = [url] + playlist
+            state.music_player.play(full_playlist)
+            _LOGGER.info("Playback restored successfully")
+            
+            if state.media_player_entity:
+                from aioesphomeapi.model import MediaPlayerState
+                state.loop.call_soon_threadsafe(
+                    state.media_player_entity.server.send_messages,
+                    [state.media_player_entity._update_state(MediaPlayerState.PLAYING)]
+                )
+    except Exception as e:
+        _LOGGER.error("Failed to restore playback: %s", e)
+
+def save_playback_state(state: ServerState, url: Optional[str], playlist: List[str] = None):
+    """Persist current playback state to disk for crash recovery."""
+    try:
+        playback_state = {
+            'url': url,
+            'playlist': playlist or [],
+            'is_playing': state.music_player.is_playing,
+            'volume': state.music_player._unduck_volume,
+            'timestamp': time.time()
+        }
+        
+        tmpfile = f"{PLAYBACK_STATE_FILE}.tmp"
+        with open(tmpfile, 'w') as f:
+            json.dump(playback_state, f, indent=2)
+        os.rename(tmpfile, PLAYBACK_STATE_FILE)
+        
+        _LOGGER.debug("Saved playback state: %s", url)
+    except Exception as e:
+        _LOGGER.error("Failed to save playback state: %s", e)
+
+def load_playback_state():
+    """Load saved playback state. Returns None if expired (>24h) or missing."""
+    try:
+        if not Path(PLAYBACK_STATE_FILE).exists():
+            return None
+            
+        with open(PLAYBACK_STATE_FILE, 'r') as f:
+            playback_state = json.load(f)
+        
+        timestamp = playback_state.get('timestamp', 0)
+        if time.time() - timestamp > 86400:
+            _LOGGER.info("Playback state too old, ignoring")
+            return None
+            
+        _LOGGER.debug("Loaded playback state: %s", playback_state.get('url'))
+        return playback_state
+    except Exception as e:
+        _LOGGER.error("Failed to load playback state: %s", e)
+        return None
+
+def clear_playback_state():
+    """Remove saved playback state file."""
+    try:
+        if Path(PLAYBACK_STATE_FILE).exists():
+            os.remove(PLAYBACK_STATE_FILE)
+            _LOGGER.debug("Cleared playback state")
+    except Exception as e:
+        _LOGGER.error("Failed to clear playback state: %s", e)
 
 def sync_volume_to_system(volume: int):
+    """Sync volume change from MPV to system config file."""
     try:
         with VolumeConfigLock(LOCK_FILE):
             if os.path.exists(SOUND_CONF):
@@ -347,6 +501,7 @@ def sync_volume_to_system(volume: int):
         _LOGGER.error("Failed to sync volume to system: %s", e)
 
 def monitor_volume_config(state: ServerState, config_path: str):
+    """Watch config file for external volume changes (e.g., hardware buttons)."""
     last_mtime = 0
     last_volume = -1
     
@@ -395,6 +550,94 @@ def monitor_volume_config(state: ServerState, config_path: str):
             _LOGGER.error("Error monitoring volume config: %s", e)
         
         time.sleep(0.3)
+
+def monitor_memory_and_restart(state: ServerState, threshold_mb: int = 10):
+    """Monitor free memory and exit for restart when critically low."""
+    _LOGGER.info(f"Starting memory monitor (threshold: {threshold_mb} MB free)")
+    
+    time.sleep(10)
+    
+    consecutive_low_memory = 0
+    check_interval = 15
+    
+    while True:
+        try:
+            free_mb = None
+            try:
+                with open('/proc/meminfo', 'r') as f:
+                    for line in f:
+                        if line.startswith('MemFree:'):
+                            free_kb = int(line.split()[1])
+                            free_mb = free_kb / 1024
+                            break
+            except Exception as e:
+                _LOGGER.error("Failed to read memory info: %s", e)
+                time.sleep(check_interval)
+                continue
+            
+            if free_mb is None:
+                time.sleep(check_interval)
+                continue
+            
+            if free_mb < threshold_mb:
+                consecutive_low_memory += 1
+                _LOGGER.warning(
+                    f"Low memory detected: {free_mb:.1f} MB free "
+                    f"(threshold: {threshold_mb} MB, count: {consecutive_low_memory})"
+                )
+                
+                if consecutive_low_memory >= 2:
+                    _LOGGER.debug(
+                        f"Memory critically low: {free_mb:.1f} MB free. "
+                        "Saving state and exiting for restart..."
+                    )
+                    
+                    try:
+                        if state.music_player and state.music_player.is_playing:
+                            current_state = state.music_player.get_current_state()
+                            save_playback_state(
+                                state, 
+                                current_state['url'], 
+                                current_state['playlist']
+                            )
+                            _LOGGER.info("Playback state saved before restart")
+                        else:
+                            clear_playback_state()
+                    except Exception as e:
+                        _LOGGER.error(f"Failed to save playback state: {e}")
+                    
+                    _LOGGER.info("Exiting process (PID: %d) for memory cleanup", os.getpid())
+                    os._exit(1)
+                    
+            else:
+                if consecutive_low_memory > 0:
+                    _LOGGER.info(f"Memory recovered: {free_mb:.1f} MB free")
+                consecutive_low_memory = 0
+                
+        except Exception as e:
+            _LOGGER.error(f"Error in memory monitor: {e}")
+            consecutive_low_memory = 0
+        
+        time.sleep(check_interval)
+
+def graceful_shutdown(signum, frame):
+    """Handle SIGTERM/SIGINT: save playback state before exit."""
+    _LOGGER.info(f"Received signal {signum}, saving state before shutdown...")
+    try:
+        if hasattr(graceful_shutdown, 'state'):
+            state = graceful_shutdown.state
+            if state.music_player and state.music_player.is_playing:
+                current_state = state.music_player.get_current_state()
+                save_playback_state(
+                    state, 
+                    current_state['url'], 
+                    current_state['playlist']
+                )
+                _LOGGER.info("Playback state saved on shutdown")
+    except Exception as e:
+        _LOGGER.error(f"Error saving state on shutdown: {e}")
+    
+    sys.exit(0)
 
 def process_audio(state: ServerState, mic, block_size: int):
     """Process audio chunks from the microphone."""
