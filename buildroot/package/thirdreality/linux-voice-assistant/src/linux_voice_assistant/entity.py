@@ -244,3 +244,45 @@ class MicrophoneMuteEntity(ESPHomeEntity):
                 self.server.send_messages,
                 [self._get_state_message()],
             )
+
+class EventEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        event_types: List[str],
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self.event_types = event_types
+
+    def trigger_event(self, event_type: str) -> None:
+        if event_type not in self.event_types:
+            _LOGGER.warning("Invalid event_type: %s", event_type)
+            return
+
+        loop = getattr(self.server, "loop", None)
+        if loop and loop.is_running():
+            from aioesphomeapi.api_pb2 import EventResponse
+            
+            loop.call_soon_threadsafe(
+                self.server.send_messages,
+                [EventResponse(key=self.key, event_type=event_type)],
+            )
+            _LOGGER.info("Event triggered: %s", event_type)
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, ListEntitiesRequest):
+            from aioesphomeapi.api_pb2 import ListEntitiesEventResponse
+            
+            yield ListEntitiesEventResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                event_types=self.event_types,
+                icon="mdi:gesture-tap-button",
+            )

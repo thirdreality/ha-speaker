@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from typing import Dict, Optional, Set, Union
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
-from .entity import MediaPlayerEntity, MicrophoneMuteEntity
+from .entity import MediaPlayerEntity, MicrophoneMuteEntity, EventEntity
 
 # pylint: disable=no-name-in-module
 from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
@@ -89,6 +89,27 @@ class VoiceSatelliteProtocol(APIServer):
             state.microphone_mute_entity.server = self
         
         self.microphone_mute_entity = state.microphone_mute_entity
+
+        if state.home_button_entity is None:
+            existing = next(
+                (e for e in state.entities if isinstance(e, EventEntity)),
+                None,
+            )
+            state.home_button_entity = existing
+
+        if state.home_button_entity is None:
+            state.home_button_entity = EventEntity(
+                server=self,
+                key=len(state.entities),
+                name="Home Button",
+                object_id="linux_voice_assistant_home_button",
+                event_types=["single_press", "double_press", "triple_press"],
+            )
+            state.entities.append(state.home_button_entity)
+        else:
+            state.home_button_entity.server = self
+        
+        self.home_button_entity = state.home_button_entity
 
         self._is_streaming_audio = False
         self._tts_url: Optional[str] = None

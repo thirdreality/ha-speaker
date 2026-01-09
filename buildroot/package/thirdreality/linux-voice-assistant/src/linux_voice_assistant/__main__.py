@@ -317,6 +317,15 @@ async def main() -> None:
     memory_monitor_thread.start()
     _LOGGER.info("Memory monitor thread started")
 
+    home_button_thread = threading.Thread(
+        target=monitor_home_button,
+        args=(state, "/dev/input/event0"),
+        daemon=True,
+        name="HomeButtonMonitor"
+    )
+    home_button_thread.start()
+    _LOGGER.info("Home button monitor thread started")
+
     process_audio_thread = threading.Thread(
         target=process_audio,
         args=(state, mic, args.audio_input_block_size),
@@ -484,6 +493,82 @@ def monitor_volume_config(state: ServerState, config_path: str):
             _LOGGER.error("Error monitoring volume config: %s", e)
 
         time.sleep(0.3)    
+
+def monitor_home_button(state: ServerState, input_device: str = "/dev/input/event0"):
+    import struct
+    import select
+    
+    _LOGGER.info("Starting home button monitor: %s", input_device)
+    
+    while state.home_button_entity is None:
+        time.sleep(0.1)
+    
+    _LOGGER.debug("home_button_entity initialized, starting event monitoring")
+    
+    try:
+        with open(input_device, "rb") as f:
+            event_size = struct.calcsize('llHHI')
+            
+            click_count = 0
+            last_release_time = None
+            MULTI_CLICK_WINDOW = 0.5
+            pending_timer = None
+            
+            def trigger_click_event():
+                nonlocal click_count
+                if click_count == 1:
+                    event_type = "single_press"
+                elif click_count == 2:
+                    event_type = "double_press"
+                elif click_count >= 3:
+                    event_type = "triple_press"
+                else:
+                    return
+                
+                _LOGGER.info("Home button: %d click(s) -> %s", click_count, event_type)
+                state.home_button_entity.trigger_event(event_type)
+                click_count = 0
+            
+            while True:
+                if pending_timer and time.time() - last_release_time >= MULTI_CLICK_WINDOW:
+                    trigger_click_event()
+                    pending_timer = None
+                    last_release_time = None
+                
+                if select.select([f], [], [], 0.1)[0]:
+                    event_data = f.read(event_size)
+                    if len(event_data) < event_size:
+                        continue
+                    
+                    _, _, ev_type, code, value = struct.unpack('llHHI', event_data)
+                    
+                    # EV_KEY=1, key 102=Home, value: 1=down, 0=up
+                    if ev_type == 1 and code == 102:
+                        if value == 1:
+                            _LOGGER.debug("Home key pressed")
+                        elif value == 0:
+                            current_time = time.time()
+                            
+                            if last_release_time and (current_time - last_release_time) < MULTI_CLICK_WINDOW:
+                                click_count += 1
+                                _LOGGER.debug("Home key click count: %d", click_count)
+                            else:
+                                if pending_timer:
+                                    trigger_click_event()
+                                click_count = 1
+                                _LOGGER.debug("Home key: new click sequence")
+                            
+                            last_release_time = current_time
+                            pending_timer = True
+                            
+    except FileNotFoundError:
+        _LOGGER.error("Input device not found: %s", input_device)
+    except PermissionError:
+        _LOGGER.error("Permission denied to read: %s (need root or input group)", input_device)
+    except Exception as e:
+        _LOGGER.error("Error monitoring home button: %s", e)
+        import traceback
+        traceback.print_exc()
 
 def monitor_memory_and_restart(state: ServerState, threshold_mb: int = 15):
     """Monitor free memory and exit for restart when critically low."""
