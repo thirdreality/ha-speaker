@@ -10,7 +10,7 @@ start_service()
     /usr/share/thirdreality/script/setup_env.sh
 
     NETWORK_STATUS=$(jq -r '.network.status // "disconnected"' "$DEVICE_CONF" 2>/dev/null)
-    if [ "$NETWORK_STATUS" != "connected" ]; then
+    if [ "$NETWORK_STATUS" = "disconnected" ]; then
         /etc/init.d/S44bluetooth up
         paplay /usr/share/thirdreality/audio/setup_mode.wav &
     fi
