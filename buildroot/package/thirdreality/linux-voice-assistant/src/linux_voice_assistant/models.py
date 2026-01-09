@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .entity import ESPHomeEntity, MediaPlayerEntity
     from .mpv_player import MpvMediaPlayer
     from .satellite import VoiceSatelliteProtocol
+    from .entity import ESPHomeEntity, MediaPlayerEntity, MicrophoneMuteEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,10 +82,12 @@ class ServerState:
     download_dir: Path
 
     media_player_entity: "Optional[MediaPlayerEntity]" = None
+    microphone_mute_entity: "Optional[MicrophoneMuteEntity]" = None
     satellite: "Optional[VoiceSatelliteProtocol]" = None
     wake_words_changed: bool = False
     refractory_seconds: float = 2.0
     loop: "Optional[object]" = None
+    mic_muted: bool = False
 
     def save_preferences(self) -> None:
         """Save preferences as JSON."""

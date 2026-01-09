@@ -1,14 +1,24 @@
+import subprocess
+import json
+import logging
+import asyncio
 from abc import abstractmethod
 from collections.abc import Iterable
 from typing import Callable, List, Optional, Union
+
+_LOGGER = logging.getLogger(__name__)
+SOUND_CONF = "/data/conf/sound.json"
 
 # pylint: disable=no-name-in-module
 from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
     ListEntitiesMediaPlayerResponse,
     ListEntitiesRequest,
+    ListEntitiesSwitchResponse,
     MediaPlayerCommandRequest,
     MediaPlayerStateResponse,
     SubscribeHomeAssistantStatesRequest,
+    SwitchCommandRequest,
+    SwitchStateResponse,
 )
 from aioesphomeapi.model import MediaPlayerCommand, MediaPlayerState
 from google.protobuf import message
@@ -93,7 +103,6 @@ class MediaPlayerEntity(ESPHomeEntity):
         yield self._update_state(MediaPlayerState.PLAYING)
 
     def update_volume_from_external(self, volume_percent: int) -> None:
-        import asyncio
         
         self.volume = volume_percent / 100.0
         
@@ -127,10 +136,16 @@ class MediaPlayerEntity(ESPHomeEntity):
                     yield self._update_state(MediaPlayerState.PLAYING)
             elif msg.has_volume:
                 volume = int(msg.volume * 100)
-                self.music_player.set_volume(volume)
-                self.announce_player.set_volume(volume)
-                self.volume = msg.volume
-                yield self._update_state(self.state)
+                try:
+                    subprocess.run(
+                        ["/etc/adckey/adckey_function.sh", "SetVolume", str(volume)],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    _LOGGER.info("SetVolume via script: %d", volume)
+                except Exception as e:
+                    _LOGGER.error("SetVolume script failed: %s", e)
         elif isinstance(msg, ListEntitiesRequest):
             yield ListEntitiesMediaPlayerResponse(
                 object_id=self.object_id,
@@ -152,3 +167,80 @@ class MediaPlayerEntity(ESPHomeEntity):
             volume=self.volume,
             muted=self.muted,
         )
+
+def _read_mic_muted_from_conf() -> bool | None:
+    try:
+        with open(SOUND_CONF, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        return cfg.get("mic_mute", 1) == 0
+    except Exception as e:
+        _LOGGER.warning("Read mic_mute from %s failed: %s", SOUND_CONF, e)
+        return None
+
+class MicrophoneMuteEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        state: "ServerState",
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self.state = state
+        self.muted = state.mic_muted
+
+    def set_muted(self, muted: bool) -> None:
+        current = _read_mic_muted_from_conf()
+        _LOGGER.info("Mic mute request: target=%s, conf=%s", muted, current)
+
+        if current is None or current != muted:
+            r = subprocess.run(
+                ["/etc/adckey/adckey_function.sh", "Mute"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        
+        after = _read_mic_muted_from_conf()
+        final_muted = after if after is not None else muted
+
+        self.muted = final_muted
+        self.state.mic_muted = final_muted
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, SwitchCommandRequest) and (msg.key == self.key):
+            self.set_muted(bool(msg.state))
+            yield self._get_state_message()
+
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesSwitchResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                assumed_state=False,
+                entity_category=1,
+                icon="mdi:microphone-off",
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            yield self._get_state_message()
+
+    def _get_state_message(self) -> SwitchStateResponse:
+        return SwitchStateResponse(
+            key=self.key,
+            state=self.muted,
+        )
+
+    def update_muted_from_external(self, muted: bool) -> None:
+        self.muted = muted
+        self.state.mic_muted = muted
+
+        loop = getattr(self.server, "loop", None)
+        if loop and loop.is_running():
+            loop.call_soon_threadsafe(
+                self.server.send_messages,
+                [self._get_state_message()],
+            )

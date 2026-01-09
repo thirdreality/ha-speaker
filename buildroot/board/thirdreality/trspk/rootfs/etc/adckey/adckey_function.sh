@@ -117,6 +117,32 @@ mic_mute() {
     sync
 }
 
+set_volume() {
+    vol="$1"
+    [ -z "$vol" ] && exit 1
+    
+    if [ "$vol" -ge 100 ]; then
+        vol=100
+    elif [ "$vol" -le 0 ]; then
+        vol=0
+    fi
+    
+    exec 200>"$LOCK_FILE"
+    flock -x 200
+    
+    pactl set-sink-volume @DEFAULT_SINK@ "$vol"% > /dev/null 2>&1
+    
+    tmpfile=$(mktemp)
+    jq --argjson v "$vol" '.volume = $v' "$SOUND_CONF" > "$tmpfile" && mv "$tmpfile" "$SOUND_CONF"
+    sync
+    
+    flock -u 200
+    exec 200>&-
+    
+    echo "SetVolume: $vol%"
+    dbus-send --system --type=signal /com/3r/EventBus com._3reality.EventBus.LedShow boolean:false array:string:'/usr/share/thirdreality/animation/volume-changed.animation'
+}
+
 change_wifi() {
     if [ -f "/tmp/change_wifi" ];then
         rm -rf /tmp/change_wifi
@@ -132,6 +158,7 @@ change_wifi() {
 case $1 in
     "Volup") vol "up" ;;
     "Voldown") vol "down" ;;
+    "SetVolume") set_volume "$2" ;;
     "Home") echo "home was pressed";;
     "Tap") echo "tap was pressed";;
     "longpressTap") change_wifi ;;

@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from typing import Dict, Optional, Set, Union
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
+from .entity import MediaPlayerEntity, MicrophoneMuteEntity
 
 # pylint: disable=no-name-in-module
 from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
@@ -18,6 +19,7 @@ from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
     ListEntitiesRequest,
     MediaPlayerCommandRequest,
     SubscribeHomeAssistantStatesRequest,
+    SwitchCommandRequest,
     VoiceAssistantAnnounceFinished,
     VoiceAssistantAnnounceRequest,
     VoiceAssistantAudio,
@@ -66,6 +68,27 @@ class VoiceSatelliteProtocol(APIServer):
                 announce_player=state.tts_player,
             )
             self.state.entities.append(self.state.media_player_entity)
+
+        if state.microphone_mute_entity is None:
+            existing = next(
+                (e for e in state.entities if isinstance(e, MicrophoneMuteEntity)),
+                None,
+            )
+            state.microphone_mute_entity = existing
+        
+        if state.microphone_mute_entity is None:
+            state.microphone_mute_entity = MicrophoneMuteEntity(
+                server=self,
+                key=len(state.entities),
+                name="Microphone Mute",
+                object_id="linux_voice_assistant_microphone_mute",
+                state=state,
+            )
+            state.entities.append(state.microphone_mute_entity)
+        else:
+            state.microphone_mute_entity.server = self
+        
+        self.microphone_mute_entity = state.microphone_mute_entity
 
         self._is_streaming_audio = False
         self._tts_url: Optional[str] = None
@@ -211,6 +234,7 @@ class VoiceSatelliteProtocol(APIServer):
                 ListEntitiesRequest,
                 SubscribeHomeAssistantStatesRequest,
                 MediaPlayerCommandRequest,
+                SwitchCommandRequest,
             ),
         ):
             for entity in self.state.entities:

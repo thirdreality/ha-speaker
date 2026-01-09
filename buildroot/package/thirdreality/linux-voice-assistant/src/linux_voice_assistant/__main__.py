@@ -252,12 +252,14 @@ async def main() -> None:
     assert stop_model is not None
 
     initial_volume = 50
+    initial_mic_muted = False
     try:
         if Path(SOUND_CONF).exists():
             with open(SOUND_CONF, 'r') as f:
                 sound_config = json.load(f)
                 initial_volume = sound_config.get('volume', 50)
-                _LOGGER.info("Loaded initial volume from config: %d", initial_volume)
+                initial_mic_muted = sound_config.get('mic_mute', 0) == 0
+                _LOGGER.info("Loaded initial volume: %d, mic_muted: %s", initial_volume, initial_mic_muted)
     except Exception as e:
         _LOGGER.warning("Failed to load sound config, using default volume: %s", e)
 
@@ -277,12 +279,10 @@ async def main() -> None:
         stop_word=stop_model,
         music_player=MpvMediaPlayer(
             device=args.audio_output_device,
-            volume_callback=sync_volume_to_system,
             state_callback=on_playback_state_change
         ),
         tts_player=MpvMediaPlayer(
             device=args.audio_output_device,
-            volume_callback=sync_volume_to_system
         ),
         wakeup_sound=args.wakeup_sound,
         timer_finished_sound=args.timer_finished_sound,
@@ -291,6 +291,7 @@ async def main() -> None:
         refractory_seconds=args.refractory_seconds,
         download_dir=args.download_dir,
         loop=None,
+        mic_muted=initial_mic_muted,
     )
 
     graceful_shutdown.state = state
@@ -309,21 +310,12 @@ async def main() -> None:
 
     memory_monitor_thread = threading.Thread(
         target=monitor_memory_and_restart,
-        args=(state, 10),
+        args=(state, 15),
         daemon=True,
         name="MemoryMonitor"
     )
     memory_monitor_thread.start()
     _LOGGER.info("Memory monitor thread started")
-
-    # health_monitor_thread = threading.Thread(
-    #     target=monitor_playback_health,
-    #     args=(state,),
-    #     daemon=True,
-    #     name="HealthMonitor"
-    # )
-    # health_monitor_thread.start()
-    # _LOGGER.info("Playback health monitor thread started")
 
     process_audio_thread = threading.Thread(
         target=process_audio,
@@ -362,51 +354,6 @@ async def main() -> None:
 
 
 # -----------------------------------------------------------------------------
-# def monitor_playback_health(state: ServerState):
-#     import time
-
-#     _LOGGER.info("Starting playback health monitor")
-#     time.sleep(30)
-
-#     while True:
-#         try:
-#             time.sleep(20)
-
-#             if state.music_player:
-#                 current_state = state.music_player.get_current_state()
-
-#                 try:
-#                     is_idle = state.music_player.player.idle_active if hasattr(
-#                         state.music_player.player, 'idle_active'
-#                     ) else None
-                    
-#                     is_paused = state.music_player.player.pause if hasattr(
-#                         state.music_player.player, 'pause'
-#                     ) else None
-
-#                     _LOGGER.debug(
-#                         f"Health check: "
-#                         f"is_playing={current_state['is_playing']}, "
-#                         f"url={current_state['url']}, "
-#                         f"mpv_idle={is_idle}, "
-#                         f"mpv_paused={is_paused}"
-#                     )
-
-#                     if current_state['is_playing'] and is_idle:
-#                         _LOGGER.error(
-#                             "⚠⚠⚠ INCONSISTENT STATE DETECTED! "
-#                             "is_playing=True but MPV is idle. "
-#                             f"URL: {current_state['url']}"
-#                         )
-
-#                 except Exception as e:
-#                     _LOGGER.error(f"Error in health check: {e}")
-
-#         except Exception as e:
-#             _LOGGER.error(f"Error in playback health monitor: {e}")
-
-#         time.sleep(20)
-
 def restore_playback(state: ServerState, playback_state: dict):
     """Restore playback from saved state."""
     try:
@@ -476,34 +423,11 @@ def clear_playback_state():
     except Exception as e:
         _LOGGER.error("Failed to clear playback state: %s", e)
 
-def sync_volume_to_system(volume: int):
-    """Sync volume change from MPV to system config file."""
-    try:
-        with VolumeConfigLock(LOCK_FILE):
-            if os.path.exists(SOUND_CONF):
-                with open(SOUND_CONF, 'r') as f:
-                    config = json.load(f)
-            else:
-                config = {"volume": 50, "mic_gain": 30, "mic_mute": 1}
-            
-            config['volume'] = volume
-            
-            tmpfile = f"{SOUND_CONF}.tmp"
-            with open(tmpfile, 'w') as f:
-                json.dump(config, f, indent=2)
-            os.rename(tmpfile, SOUND_CONF)
-            os.sync()
-        
-        _LOGGER.debug("Synced volume to system: %d", volume)
-    except subprocess.TimeoutExpired:
-        _LOGGER.error("amixer command timeout")
-    except Exception as e:
-        _LOGGER.error("Failed to sync volume to system: %s", e)
-
 def monitor_volume_config(state: ServerState, config_path: str):
     """Watch config file for external volume changes (e.g., hardware buttons)."""
     last_mtime = 0
     last_volume = -1
+    last_mic_muted = None
     
     _LOGGER.debug("Starting volume config monitor: %s", config_path)
     
@@ -524,34 +448,44 @@ def monitor_volume_config(state: ServerState, config_path: str):
             _LOGGER.info("Initial volume synced to HA: %d", initial_vol)
     except Exception as e:
         _LOGGER.error("Failed to sync initial config: %s", e)
-    
+
     while True:
         try:
             if os.path.exists(config_path):
                 mtime = os.path.getmtime(config_path)
                 if mtime > last_mtime:
                     last_mtime = mtime
-                    
+
                     with VolumeConfigLock(LOCK_FILE):
-                        with open(config_path, 'r') as f:
+                        with open(config_path, "r") as f:
                             config = json.load(f)
-                            volume = config.get('volume', 50)
-                    
+                            volume = config.get("volume", 50)
+                            mic_muted = config.get("mic_mute", 1) == 0
+
                     if volume != last_volume:
                         last_volume = volume
                         state.music_player.set_volume(volume, from_external=True)
                         state.tts_player.set_volume(volume, from_external=True)
                         state.media_player_entity.update_volume_from_external(volume)
                         _LOGGER.info("Volume updated from config: %d", volume)
-                    
+
+                    if mic_muted != last_mic_muted:
+                        last_mic_muted = mic_muted
+                        state.mic_muted = mic_muted
+
+                        ent = state.microphone_mute_entity
+                        if ent is not None:
+                            ent.update_muted_from_external(mic_muted)
+                            _LOGGER.info("Mic mute updated from config -> HA: %s", mic_muted)
+
         except json.JSONDecodeError:
             pass
         except Exception as e:
             _LOGGER.error("Error monitoring volume config: %s", e)
-        
-        time.sleep(0.3)
 
-def monitor_memory_and_restart(state: ServerState, threshold_mb: int = 10):
+        time.sleep(0.3)    
+
+def monitor_memory_and_restart(state: ServerState, threshold_mb: int = 15):
     """Monitor free memory and exit for restart when critically low."""
     _LOGGER.info(f"Starting memory monitor (threshold: {threshold_mb} MB free)")
     
@@ -664,6 +598,9 @@ def process_audio(state: ServerState, mic, block_size: int):
                 )
 
                 if state.satellite is None:
+                    continue
+
+                if state.mic_muted:
                     continue
 
                 if (not wake_words) or (state.wake_words_changed and state.wake_words):
