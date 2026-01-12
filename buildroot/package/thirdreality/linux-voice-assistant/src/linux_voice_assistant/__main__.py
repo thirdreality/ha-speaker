@@ -310,7 +310,7 @@ async def main() -> None:
 
     memory_monitor_thread = threading.Thread(
         target=monitor_memory_and_restart,
-        args=(state, 15),
+        args=(state, 10),
         daemon=True,
         name="MemoryMonitor"
     )
@@ -570,7 +570,7 @@ def monitor_home_button(state: ServerState, input_device: str = "/dev/input/even
         import traceback
         traceback.print_exc()
 
-def monitor_memory_and_restart(state: ServerState, threshold_mb: int = 15):
+def monitor_memory_and_restart(state: ServerState, threshold_mb: int = 10):
     """Monitor free memory and exit for restart when critically low."""
     _LOGGER.info(f"Starting memory monitor (threshold: {threshold_mb} MB free)")
     
