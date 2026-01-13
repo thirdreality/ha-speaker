@@ -28,12 +28,16 @@ if [ ! -f "$DEVICE_CONF" ] || [ ! -s "$DEVICE_CONF" ] || ! jq empty "$DEVICE_CON
 fi
 
 CMDLINE_VERSION=$(cat /proc/cmdline | grep -o 'firmware_version=[^ ]*' | cut -d'=' -f2)
+FORMATTED_VERSION=$(echo "$CMDLINE_VERSION" | awk -F'.' '{
+    printf "%s.%02d.%02d", $1, $2, $3
+}')
+
 JSON_VERSION=$(jq -r '.device.firmwareVersion // ""' "$DEVICE_CONF")
-if [ "$JSON_VERSION" != "$CMDLINE_VERSION" ]; then
-    jq --arg version "$CMDLINE_VERSION" \
+if [ "$JSON_VERSION" != "$FORMATTED_VERSION" ]; then
+    jq --arg version "$FORMATTED_VERSION" \
         '.device.firmwareVersion = $version' \
         "$DEVICE_CONF" > "${DEVICE_CONF}.tmp" && mv "${DEVICE_CONF}.tmp" "$DEVICE_CONF"
-    echo "Version updated to: $CMDLINE_VERSION"
+    echo "Version updated to: $FORMATTED_VERSION"
 fi
 
 MAC_ADDRESS=$(ifconfig wlan0 | grep "HWaddr" | awk '{print $5}')
