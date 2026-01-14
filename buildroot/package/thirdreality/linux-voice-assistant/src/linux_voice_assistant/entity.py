@@ -67,6 +67,9 @@ class MediaPlayerEntity(ESPHomeEntity):
         announcement: bool = False,
         done_callback: Optional[Callable[[], None]] = None,
     ) -> Iterable[message.Message]:
+        url_str = url[0] if isinstance(url, list) else url
+        is_connection_test = "/api/assist_satellite/connection_test" in url_str
+
         if announcement:
             if self.music_player.is_playing:
                 # Announce, resume music
@@ -100,7 +103,10 @@ class MediaPlayerEntity(ESPHomeEntity):
                 ),
             )
 
-        yield self._update_state(MediaPlayerState.PLAYING)
+        _LOGGER.debug("is_connection_test: %s", is_connection_test)
+        if not is_connection_test:
+            yield self._update_state(MediaPlayerState.PLAYING)
+            _LOGGER.debug("update_state: PLAYING")
 
     def update_volume_from_external(self, volume_percent: int) -> None:
         
