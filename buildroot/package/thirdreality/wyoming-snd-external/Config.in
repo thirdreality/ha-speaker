@@ -1,7 +1,0 @@
-config BR2_PACKAGE_WYOMING_SND_EXTERNAL
-	bool "wyoming-snd-external"
-	depends on BR2_PACKAGE_PYTHON3
-	depends on BR2_PACKAGE_PYTHON_WYOMING
-    default n
-	help
-        https://github.com/rhasspy/wyoming-snd-external

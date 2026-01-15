@@ -19,7 +19,8 @@ BLUEZ5_UTILS_AUTORECONF = YES
 BLUEZ5_UTILS_DEPENDENCIES = \
 	$(if $(BR2_PACKAGE_BLUEZ5_UTILS_HEADERS),bluez5_utils-headers) \
 	dbus \
-	libglib2
+	libglib2 \
+	cjson
 
 BLUEZ5_UTILS_CONF_OPTS = \
 	--enable-library \

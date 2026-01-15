@@ -1,6 +1,0 @@
-config BR2_PACKAGE_WYOMING_OPENWAKEWORD
-	bool "wyoming-openwakeword"
-    depends on BR2_PACKAGE_PYTHON_WYOMING
-    default n
-	help
-        https://github.com/rhasspy/wyoming-openwakeword
