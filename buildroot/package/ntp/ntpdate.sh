@@ -23,6 +23,17 @@ if [ -x $NTPDATE_BIN ] ; then
         if [ $? = 0 ]; then
             echo -n "Getting initial time via ntp"
             echo "ntpdate OK"
+
+            if [ ! -f /tmp/first_wifi_connected ]; then
+                /etc/init.d/S44bluetooth stop
+                touch /tmp/first_wifi_connected
+
+                /usr/share/thirdreality/script/voice-assistant start
+                /usr/share/thirdreality/script/music-assistant start
+
+                paplay /usr/share/thirdreality/audio/ready_to_connect_ha.wav &
+            fi
+
             /bin/date +%Y-%m-%d > /etc/last_date
             #If the platform have RTC, we will write back to RTC HW
             if [ -e /dev/rtc ] || [ -e /dev/misc/rtc ]; then

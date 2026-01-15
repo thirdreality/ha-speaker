@@ -13,8 +13,6 @@ start_voice_assistant_process() {
         rm -f $VOICE_ASSISTANT_PIDFILE
     fi
     
-    sleep 5
-
     SPK_NAME=$(jq -r '.device.name // "thirdreality-speaker"' "$DEVICE_CONF")
     python3 -m linux_voice_assistant --name "$SPK_NAME" --wake-model "okay_nabu" --debug &
     echo $! > $VOICE_ASSISTANT_PIDFILE

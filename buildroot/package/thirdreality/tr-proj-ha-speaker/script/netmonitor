@@ -68,11 +68,6 @@ netUpAction()
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Network connected"
     rm -f /tmp/net_disconnected
     update_net_state "connected"
-
-    if [ ! -f /tmp/first_wifi_connected ]; then
-        /etc/init.d/S44bluetooth stop
-        touch /tmp/first_wifi_connected
-    fi
 }
 
 netDownAction()

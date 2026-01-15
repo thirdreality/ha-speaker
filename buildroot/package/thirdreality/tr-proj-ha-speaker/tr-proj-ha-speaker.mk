@@ -25,6 +25,7 @@ define TR_PROJ_HA_SPEAKER_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0644 $(@D)/audio/change_wifi.wav ${REALITY_DIR}/audio/change_wifi.wav
 	$(INSTALL) -D -m 0644 $(@D)/audio/not_ready.wav ${REALITY_DIR}/audio/not_ready.wav
 	$(INSTALL) -D -m 0644 $(@D)/audio/factory_reset.wav ${REALITY_DIR}/audio/factory_reset.wav
+	$(INSTALL) -D -m 0644 $(@D)/audio/ready_to_connect_ha.wav ${REALITY_DIR}/audio/ready_to_connect_ha.wav
 
 	$(INSTALL) -D -m 0755 $(@D)/script/setup_env.sh ${REALITY_DIR}/script/setup_env.sh
 	$(INSTALL) -D -m 0755 $(@D)/script/wifi_connect ${REALITY_DIR}/script/wifi_connect

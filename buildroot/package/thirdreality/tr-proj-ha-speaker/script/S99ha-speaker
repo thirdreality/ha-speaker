@@ -19,8 +19,6 @@ start_service()
     echo $! > "$SUPERVISOR_PID"
 
     /usr/share/thirdreality/script/netmonitor start
-    /usr/share/thirdreality/script/voice-assistant start
-    /usr/share/thirdreality/script/music-assistant start
 }
 
 stop_pid()
