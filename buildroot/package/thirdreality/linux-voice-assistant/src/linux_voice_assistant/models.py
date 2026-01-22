@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from .entity import ESPHomeEntity, MediaPlayerEntity
     from .mpv_player import MpvMediaPlayer
     from .satellite import VoiceSatelliteProtocol
-    from .entity import ESPHomeEntity, MediaPlayerEntity, MicrophoneMuteEntity, EventEntity
+    from .entity import ESPHomeEntity, MediaPlayerEntity, MicrophoneMuteEntity, EventEntity, UpdateEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,6 +84,7 @@ class ServerState:
     media_player_entity: "Optional[MediaPlayerEntity]" = None
     microphone_mute_entity: "Optional[MicrophoneMuteEntity]" = None
     home_button_entity: "Optional[EventEntity]" = None
+    update_entity: "Optional[UpdateEntity]" = None
     satellite: "Optional[VoiceSatelliteProtocol]" = None
     wake_words_changed: bool = False
     refractory_seconds: float = 2.0

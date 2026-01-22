@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from typing import Dict, Optional, Set, Union
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
-from .entity import MediaPlayerEntity, MicrophoneMuteEntity, EventEntity
+from .entity import MediaPlayerEntity, MicrophoneMuteEntity, EventEntity, UpdateEntity
 
 # pylint: disable=no-name-in-module
 from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
@@ -20,6 +20,7 @@ from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
     MediaPlayerCommandRequest,
     SubscribeHomeAssistantStatesRequest,
     SwitchCommandRequest,
+    UpdateCommandRequest,
     VoiceAssistantAnnounceFinished,
     VoiceAssistantAnnounceRequest,
     VoiceAssistantAudio,
@@ -110,6 +111,17 @@ class VoiceSatelliteProtocol(APIServer):
             state.home_button_entity.server = self
         
         self.home_button_entity = state.home_button_entity
+
+        if state.update_entity is None:
+            state.update_entity = UpdateEntity(
+                server=self,
+                key=len(state.entities),
+                name="Firmware Update",
+                object_id="linux_voice_assistant_update",
+            )
+            state.entities.append(state.update_entity)
+        else:
+            state.update_entity.server = self
 
         self._is_streaming_audio = False
         self._tts_url: Optional[str] = None
@@ -256,6 +268,7 @@ class VoiceSatelliteProtocol(APIServer):
                 SubscribeHomeAssistantStatesRequest,
                 MediaPlayerCommandRequest,
                 SwitchCommandRequest,
+                UpdateCommandRequest,
             ),
         ):
             for entity in self.state.entities:
