@@ -36,6 +36,12 @@ start() {
             sleep 5
         fi
 
+        if [ -z "$(pidof pulseaudio)" ]; then
+            sync
+            sleep 3
+            reboot -f
+        fi
+
         sleep 10
     done
 }
