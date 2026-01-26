@@ -59,18 +59,24 @@
 #include <net/if.h>
 #endif
 
-static void str2uuid(const char *str, uint8_t *value, uint8_t type);
 static struct server *server_create(int fd);
 
 static void start_advertising(void);
 static void stop_advertising(void);
+static void update_advertising_data(void);
+static void set_adv_data(void);
 static void reset_no_client_timeout(void);
 static void no_client_timeout_cb(int timeout_id, void *user_data);
-static const char* get_device_name(void);
+static const char *get_device_name(void);
 
-// Keep the original 128-bit definitions for fallback
-#define SERVICE_UUID_STR "6e400000-0000-4e98-8024-bc5b71e0893e"
-#define WIFI_CONFIG_CHAR_UUID_STR "6e400001-0000-4e98-8024-bc5b71e0893e"
+// Improv BLE UUIDs
+#define IMPROV_SERVICE_UUID_STR "00467768-6228-2272-4663-277478268000"
+#define IMPROV_CHAR_STATE_UUID_STR "00467768-6228-2272-4663-277478268001"
+#define IMPROV_CHAR_ERROR_UUID_STR "00467768-6228-2272-4663-277478268002"
+#define IMPROV_CHAR_RPC_UUID_STR "00467768-6228-2272-4663-277478268003"
+#define IMPROV_CHAR_RESULT_UUID_STR "00467768-6228-2272-4663-277478268004"
+#define IMPROV_CHAR_CAPS_UUID_STR "00467768-6228-2272-4663-277478268005"
+
 #define ATT_CID 4
 
 static struct hci_dev_info hdi;
@@ -87,456 +93,568 @@ struct server {
 	struct gatt_db *db;
 	struct bt_gatt_server *gatt;
 
-	// WiFi configuration characteristic
-	struct gatt_db_attribute *wifi_chara_att;
-	uint16_t wifi_chara_handle;
-
 	bool notifying;
 	bool notification_ready;
+	bool notify_confirm;
 	pthread_mutex_t notification_lock;
 
-    // BLE GATT long write buffer for WiFi config
+	// BLE GATT long write buffer for RPC
 #define MAX_WRITE_BUFFER 1024
-    char write_buffer[MAX_WRITE_BUFFER];
-    size_t write_buffer_len;
-    bool write_in_progress;
+	uint8_t write_buffer[MAX_WRITE_BUFFER];
+	size_t write_buffer_len;
+	bool write_in_progress;
 };
+
+static struct {
+	struct gatt_db_attribute *cap;
+	struct gatt_db_attribute *state;
+	struct gatt_db_attribute *error;
+	struct gatt_db_attribute *rpc;
+	struct gatt_db_attribute *result;
+	uint16_t result_handle;
+	/* Value handles from gatt_db_attribute_get_handle() - used for notifications */
+	uint16_t state_value_handle;
+	uint16_t error_value_handle;
+} improv_chars;
 
 // Global state management variables
 static bool client_connected = false;
 static bool advertising = false;
 static volatile bool should_exit = false;
 static unsigned int no_client_timeout_id = 0;
+static unsigned int adv_rotate_timeout_id = 0;
+
+// ESPHome-style advertising cadence: name for 1s every 60s
+#define NAME_ADVERTISING_INTERVAL_MS 60000
+#define NAME_ADVERTISING_DURATION_MS 1000
+static uint64_t last_name_adv_time_ms = 0;
+static bool adv_name_active = false;
+
+// Improv state
+static uint8_t improv_state = 0x02; // Authorized (no physical auth required)
+static uint8_t improv_error = 0x00; // No error
+static uint8_t improv_caps = 0x01; // Identify only (match ESPHome default)
 
 static void delayed_exit_cb(int timeout_id, void *user_data)
 {
-    printf("[EXIT] Delayed exit after sending WiFi result\n");
-    should_exit = true;
-    mainloop_quit();
+	(void)timeout_id;
+	(void)user_data;
+	should_exit = true;
+	mainloop_quit();
 }
 
 static int process_wifi_config(const char *json_str, char *response, size_t response_len)
 {
-    cJSON *root = cJSON_Parse(json_str);
-    if (!root) {
-        printf("[DEBUG] Failed to parse JSON\n");
-        snprintf(response, response_len, "{\"err\":\"bad fmt\"}");
-        return -1;
-    }
-    cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
-    if (!ssid_item || !cJSON_IsString(ssid_item)) {
-        printf("[DEBUG] Missing or invalid SSID\n");
-        cJSON_Delete(root);
-        snprintf(response, response_len, "{\"err\":\"bad ssid\"}");
-        return -1;
-    }
+	cJSON *root = cJSON_Parse(json_str);
+	if (!root) {
+		snprintf(response, response_len, "{\"err\":\"bad fmt\"}");
+		return -1;
+	}
+	cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
+	if (!ssid_item || !cJSON_IsString(ssid_item)) {
+		cJSON_Delete(root);
+		snprintf(response, response_len, "{\"err\":\"bad ssid\"}");
+		return -1;
+	}
 
-    char *ssid = ssid_item->valuestring;
-    cJSON *password_item = cJSON_GetObjectItem(root, "pw");
-    char *password = NULL;
-    if (password_item && cJSON_IsString(password_item)) {
-        password = password_item->valuestring;
-    }
+	char *ssid = ssid_item->valuestring;
+	cJSON *password_item = cJSON_GetObjectItem(root, "pw");
+	char *password = NULL;
+	if (password_item && cJSON_IsString(password_item)) {
+		password = password_item->valuestring;
+	}
 
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "/usr/share/thirdreality/script/wifi_connect connect '%s' '%s'",
-             ssid, password);
-    
-    int exit_status = system(cmd);
-    int exit_code = WEXITSTATUS(exit_status);
+	char cmd[512];
+	snprintf(cmd, sizeof(cmd), "/usr/share/thirdreality/script/wifi_connect connect '%s' '%s'", ssid, password);
 
-    printf("[WIFI] wifi_connect exit code: %d\n", exit_code);
-    if (exit_code != 0) {
-        printf("[WIFI] WiFi connection failed with exit code: %d\n", exit_code);
+	int exit_status = system(cmd);
+	int exit_code = WEXITSTATUS(exit_status);
 
-        const char *err_msg;
-        switch (exit_code) {
-            case 10:
-                err_msg = "SSID not found";
-                break;
-            case 12:
-                err_msg = "Failed to get IP";
-                break;
-            case 13:
-                err_msg = "Connect failed";
-                break;
-            case 14:
-                err_msg = "Switch WiFi failed";
-                break;
-            default:
-                err_msg = "Unknown error";
-                break;
-        }
+	if (exit_code != 0) {
+		const char *err_msg;
+		switch (exit_code) {
+		case 10:
+			err_msg = "SSID not found";
+			break;
+		case 12:
+			err_msg = "Failed to get IP";
+			break;
+		case 13:
+			err_msg = "Connect failed";
+			break;
+		case 14:
+			err_msg = "Switch WiFi failed";
+			break;
+		default:
+			err_msg = "Unknown error";
+			break;
+		}
 
-        snprintf(response, response_len, "{\"err\":\"%s\"}", err_msg);
-        cJSON_Delete(root);
-        return -1;
-    }
+		snprintf(response, response_len, "{\"err\":\"%s\"}", err_msg);
+		cJSON_Delete(root);
+		return -1;
+	}
 
-    FILE *device_info_fp = fopen("/data/conf/device.json", "r");
-    if (!device_info_fp) {
-        printf("[WIFI] Failed to open device.json\n");
-        snprintf(response, response_len, "{\"err\":\"Failed to read IP\"}");
-        cJSON_Delete(root);
-        return -1;
-    }
+	FILE *device_info_fp = fopen("/data/conf/device.json", "r");
+	if (!device_info_fp) {
+		snprintf(response, response_len, "{\"err\":\"Failed to read IP\"}");
+		cJSON_Delete(root);
+		return -1;
+	}
 
-    fseek(device_info_fp, 0, SEEK_END);
-    long file_size = ftell(device_info_fp);
-    fseek(device_info_fp, 0, SEEK_SET);
+	fseek(device_info_fp, 0, SEEK_END);
+	long file_size = ftell(device_info_fp);
+	fseek(device_info_fp, 0, SEEK_SET);
 
-    char *device_info_content = malloc(file_size + 1);
-    if (!device_info_content) {
-        printf("[WIFI] Failed to allocate memory for device.json\n");
-        fclose(device_info_fp);
-        snprintf(response, response_len, "{\"err\":\"Memory error\"}");
-        cJSON_Delete(root);
-        return -1;
-    }
+	char *device_info_content = malloc(file_size + 1);
+	if (!device_info_content) {
+		fclose(device_info_fp);
+		snprintf(response, response_len, "{\"err\":\"Memory error\"}");
+		cJSON_Delete(root);
+		return -1;
+	}
 
-    fread(device_info_content, 1, file_size, device_info_fp);
-    device_info_content[file_size] = '\0';
-    fclose(device_info_fp);
+	fread(device_info_content, 1, file_size, device_info_fp);
+	device_info_content[file_size] = '\0';
+	fclose(device_info_fp);
 
-    cJSON *device_info = cJSON_Parse(device_info_content);
-    free(device_info_content);
+	cJSON *device_info = cJSON_Parse(device_info_content);
+	free(device_info_content);
 
-    if (!device_info) {
-        printf("[WIFI] Failed to parse device.json\n");
-        snprintf(response, response_len, "{\"err\":\"Invalid device_info\"}");
-        cJSON_Delete(root);
-        return -1;
-    }
+	if (!device_info) {
+		snprintf(response, response_len, "{\"err\":\"Invalid device_info\"}");
+		cJSON_Delete(root);
+		return -1;
+	}
 
-    cJSON *network = cJSON_GetObjectItem(device_info, "network");
-    cJSON *ip_item = network ? cJSON_GetObjectItem(network, "ip") : NULL;
+	cJSON *network = cJSON_GetObjectItem(device_info, "network");
+	cJSON *ip_item = network ? cJSON_GetObjectItem(network, "ip") : NULL;
 
-    if (!ip_item || !cJSON_IsString(ip_item)) {
-        printf("[WIFI] Failed to get IP from device.json\n");
-        snprintf(response, response_len, "{\"err\":\"IP not found\"}");
-        cJSON_Delete(device_info);
-        cJSON_Delete(root);
-        return -1;
-    }
+	if (!ip_item || !cJSON_IsString(ip_item)) {
+		snprintf(response, response_len, "{\"err\":\"IP not found\"}");
+		cJSON_Delete(device_info);
+		cJSON_Delete(root);
+		return -1;
+	}
 
-    char *ip = ip_item->valuestring;
-    if (!ip || strlen(ip) == 0) {
-        printf("[WIFI] IP address is empty in device.json\n");
-        snprintf(response, response_len, "{\"err\":\"IP is empty\"}");
-        cJSON_Delete(device_info);
-        cJSON_Delete(root);
-        return -1;
-    }
+	char *ip = ip_item->valuestring;
+	if (!ip || strlen(ip) == 0) {
+		snprintf(response, response_len, "{\"err\":\"IP is empty\"}");
+		cJSON_Delete(device_info);
+		cJSON_Delete(root);
+		return -1;
+	}
 
-    printf("[WIFI] WiFi connection successful! IP: %s\n", ip);
+	snprintf(response, response_len, "{\"ip\":\"%s\"}", ip);
 
-    snprintf(response, response_len, "{\"ip\":\"%s\"}", ip);
+	cJSON_Delete(device_info);
+	cJSON_Delete(root);
+	return 0;
+}
 
-    cJSON_Delete(device_info);
-    cJSON_Delete(root);
-    return 0;
+static int process_wifi_config_improv(const char *ssid, const char *pw, char *out_ip, size_t out_ip_len)
+{
+	char json[512];
+	if (pw && strlen(pw) > 0) {
+		snprintf(json, sizeof(json), "{\"ssid\":\"%s\",\"pw\":\"%s\"}", ssid, pw);
+	} else {
+		snprintf(json, sizeof(json), "{\"ssid\":\"%s\",\"pw\":\"\"}", ssid);
+	}
+
+	char response[256];
+	int rc = process_wifi_config(json, response, sizeof(response));
+	if (rc != 0) {
+		return -1;
+	}
+
+	cJSON *root = cJSON_Parse(response);
+	if (!root)
+		return -1;
+	cJSON *ip_item = cJSON_GetObjectItem(root, "ip");
+	if (!ip_item || !cJSON_IsString(ip_item)) {
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	snprintf(out_ip, out_ip_len, "%s", ip_item->valuestring);
+	cJSON_Delete(root);
+	return 0;
 }
 
 static void att_disconnect_cb(int err, void *user_data)
 {
-    struct server *server = user_data;
-    printf("ATT Disconnect callback: err=%d (%s)\n", err, strerror(err));
+	struct server *server = user_data;
+	(void)server;
+	(void)err;
 
-    printf("[DISCONNECT] Client disconnected\n");
+	client_connected = false;
 
-    client_connected = false;
+	if (wifi_config_completed) {
+		should_exit = true;
+		mainloop_quit();
+		return;
+	}
 
-    if (err == 8) {
-        printf("[DISCONNECT] LINK_SUPERVISION_TIMEOUT detected - connection lost due to timeout\n");
-    }
-
-    if (wifi_config_completed) {
-        printf("[EXIT] WiFi configuration completed and client disconnected, exiting...\n");
-        should_exit = true;
-        mainloop_quit();
-        return;
-    }
-
-    mainloop_quit();
+	mainloop_quit();
 }
 
-static void send_notification(struct server *server, const char *message, uint16_t char_handle)
+static void send_notification_raw(struct server *server, const uint8_t *data, size_t len, uint16_t char_handle)
 {
-    if (!server->gatt) {
-        printf("[DEBUG] No GATT server available for notification\n");
-        return;
-    }
+	if (!server->gatt) {
+		return;
+	}
 
-    size_t message_len = strlen(message);
-    if (message_len <= 20) {
-        uint8_t buffer[21];
-        memcpy(buffer, message, message_len);
-        bool result = bt_gatt_server_send_notification(server->gatt, char_handle,
-                buffer, message_len, false);
-        printf("[DEBUG] Single packet notification result: %s\n", result ? "SUCCESS" : "FAILED");
-        return;
-    }
+	uint16_t mtu = bt_gatt_server_get_mtu(server->gatt);
+	size_t max_payload = mtu - 3;
 
-    size_t total_len = message_len + 1;
-
-    uint16_t current_mtu = bt_gatt_server_get_mtu(server->gatt);
-    size_t max_payload = current_mtu - 3;
-
-    if (total_len <= max_payload) {
-        uint8_t *buffer = malloc(total_len);
-        if (!buffer) {
-            printf("[DEBUG] Failed to allocate buffer for notification\n");
-            return;
-        }
-
-        memcpy(buffer, message, message_len);
-        buffer[message_len] = '\n';
-
-        bool result = bt_gatt_server_send_notification(server->gatt, char_handle,
-                buffer, total_len, false);
-
-        free(buffer);
-        return;
-    }
-
-    printf("[DEBUG] Message too long (%zu bytes with newline), fragmenting into %zu-byte chunks\n", 
-           total_len, max_payload);
-
-    size_t offset = 0;
-    int fragment_num = 0;
-
-    while (offset < total_len) {
-        size_t remaining = total_len - offset;
-        size_t chunk_size = (remaining > max_payload) ? max_payload : remaining;
-
-        uint8_t *buffer = malloc(chunk_size);
-        if (!buffer) {
-            printf("[DEBUG] Failed to allocate buffer for fragment %d\n", fragment_num);
-            break;
-        }
-
-        if (offset < message_len) {
-            size_t data_to_copy = (chunk_size <= (message_len - offset)) ? chunk_size : (message_len - offset);
-            memcpy(buffer, message + offset, data_to_copy);
-
-            if (offset + data_to_copy >= message_len) {
-                buffer[data_to_copy] = '\n';
-            }
-        } else {
-            buffer[0] = '\n';
-        }
-
-        bool result = bt_gatt_server_send_notification(server->gatt, char_handle,
-                buffer, chunk_size, false);
-
-        free(buffer);
-
-        if (!result) {
-            printf("[DEBUG] Fragment %d failed to send\n", fragment_num);
-            break;
-        }
-
-        printf("[DEBUG] Fragment %d sent successfully\n", fragment_num);
-
-        offset += chunk_size;
-        fragment_num++;
-
-        if (offset < total_len) {
-            usleep(50000); // 50ms delay for MTU=23 to ensure stable delivery
-        }
-    }
-
-    printf("[DEBUG] Fragmentation complete: sent %d fragments, total %zu bytes\n", 
-           fragment_num, offset);
+	size_t offset = 0;
+	while (offset < len) {
+		size_t chunk = (len - offset > max_payload) ? max_payload : (len - offset);
+		bool result = bt_gatt_server_send_notification(server->gatt, char_handle, data + offset, chunk,
+								 server->notify_confirm);
+		if (!result) {
+			break;
+		}
+		offset += chunk;
+		if (offset < len) {
+			usleep(50000);
+		}
+	}
 }
 
-static void wifi_config_write_cb(struct gatt_db_attribute *attrib,
-                unsigned int id, uint16_t offset,
-                const uint8_t *value, size_t len,
-                uint8_t opcode, struct bt_att *att,
-                void *user_data)
+static void dump_hex(const char *tag, const uint8_t *buf, size_t len)
 {
-    struct server *server = user_data;
-    char *json_str = NULL;
-    char response[256];
-
-    gatt_db_attribute_write_result(attrib, id, 0);
-
-    if (opcode == BT_ATT_OP_PREP_WRITE_REQ) {
-        if (len > 0) {
-            memcpy(server->write_buffer + offset, value, len);
-            if (offset + len > server->write_buffer_len)
-                server->write_buffer_len = offset + len;
-        } else {
-            printf("[DEBUG] Prepare Write: len=0, skip memcpy\n");
-        }
-        server->write_in_progress = true;
-        return;
-    } else if (opcode == BT_ATT_OP_EXEC_WRITE_REQ) {
-        if (!server->write_in_progress || server->write_buffer_len == 0) {
-            printf("[DEBUG] Execute Write but no data in buffer\n");
-            snprintf(response, sizeof(response), "{\"ip\":\"\"}");
-            goto send_response;
-        }
-        size_t actual_len = server->write_buffer_len;
-        for (size_t i = 0; i < server->write_buffer_len; i++) {
-            if (server->write_buffer[i] == '\n') {
-                actual_len = i;
-                break;
-            }
-        }
-        json_str = malloc(actual_len + 1);
-        if (!json_str) {
-            snprintf(response, sizeof(response), "{\"ip\":\"\"}");
-            server->write_buffer_len = 0;
-            server->write_in_progress = false;
-            goto send_response;
-        }
-        memcpy(json_str, server->write_buffer, actual_len);
-        json_str[actual_len] = '\0';
-        server->write_buffer_len = 0;
-        server->write_in_progress = false;
-        if (!client_connected) {
-            snprintf(response, sizeof(response), "{\"err\":\"BLE lost\"}");
-            free(json_str);
-            goto send_response;
-        }
-        process_wifi_config(json_str, response, sizeof(response));
-        free(json_str);
-        goto send_response;
-    } else if (opcode == BT_ATT_OP_WRITE_REQ) {
-        if (offset > 0) {
-            snprintf(response, sizeof(response), "{\"ip\":\"\"}");
-            goto send_response;
-        }
-        if (len == 0) {
-            snprintf(response, sizeof(response), "{\"ip\":\"\"}");
-            goto send_response;
-        }
-        size_t actual_len = len;
-        for (size_t i = 0; i < len; i++) {
-            if (value[i] == '\n') {
-                actual_len = i;
-                break;
-            }
-        }
-        json_str = malloc(actual_len + 1);
-        if (!json_str) {
-            snprintf(response, sizeof(response), "{\"ip\":\"\"}");
-            goto send_response;
-        }
-        memcpy(json_str, value, actual_len);
-        json_str[actual_len] = '\0';
-        if (!client_connected) {
-            snprintf(response, sizeof(response), "{\"err\":\"BLE lost\"}");
-            free(json_str);
-            goto send_response;
-        }
-        process_wifi_config(json_str, response, sizeof(response));
-        free(json_str);
-        goto send_response;
-    } else if (opcode == BT_ATT_OP_WRITE_CMD) {
-        if (offset > 0) {
-            return;
-        }
-        if (len == 0) {
-            return;
-        }
-        if (server->write_buffer_len + len > MAX_WRITE_BUFFER) {
-            server->write_buffer_len = 0;
-            return;
-        }
-        memcpy(server->write_buffer + server->write_buffer_len, value, len);
-        server->write_buffer_len += len;
-        size_t json_end = 0;
-        bool found_newline = false;
-        for (size_t i = 0; i < server->write_buffer_len; i++) {
-            if (server->write_buffer[i] == '\n') {
-                json_end = i;
-                found_newline = true;
-                break;
-            }
-        }
-        if (!found_newline) {
-            return;
-        }
-        char *json_str = malloc(json_end + 1);
-        if (!json_str) {
-            server->write_buffer_len = 0;
-            return;
-        }
-        memcpy(json_str, server->write_buffer, json_end);
-        json_str[json_end] = '\0';
-        server->write_buffer_len = 0;
-        if (!client_connected) {
-            free(json_str);
-            return;
-        }
-        process_wifi_config(json_str, response, sizeof(response));
-        free(json_str);
-        pthread_mutex_lock(&server->notification_lock);
-        if (server->notifying && client_connected) {
-            printf("[DEBUG] Sending WiFi result notification: %s\n", response);
-            send_notification(server, response, server->wifi_chara_handle);
-            
-            wifi_config_completed = true;
-            mainloop_add_timeout(2000, delayed_exit_cb, NULL, NULL);
-        } else {
-            printf("[DEBUG] Client not subscribed to notifications or disconnected, cannot send result\n");
-        }
-        pthread_mutex_unlock(&server->notification_lock);
-        return;
-    }
-
-send_response:
-        if (!client_connected) {
-            return;
-        }
-        usleep(100000);
-        if (!client_connected) {
-            return;
-        }
-        pthread_mutex_lock(&server->notification_lock);
-        if (server->notifying && client_connected) {
-            printf("[DEBUG] Sending WiFi result notification: %s\n", response);
-            send_notification(server, response, server->wifi_chara_handle);
-            
-            wifi_config_completed = true;
-            mainloop_add_timeout(2000, delayed_exit_cb, NULL, NULL);
-        } else {
-            printf("[DEBUG] Client not subscribed to notifications or disconnected, cannot send result\n");
-        }
-        pthread_mutex_unlock(&server->notification_lock);
+	printf("[DUMP] %s len=%zu: ", tag, len);
+	for (size_t i = 0; i < len; i++) {
+		printf("%02X ", buf[i]);
+	}
+	printf("\n");
 }
 
-static void str2uuid(const char *str, uint8_t *value, uint8_t type)
+static uint8_t checksum8(const uint8_t *buf, size_t len)
 {
-    if (strlen(str) != 36) {
-        return;
-    }
-
-    int i = 0, j = 0;
-    char buf[3] = {0};
-
-    while (i < 36 && j < 16) {
-        if (str[i] == '-') {
-            i++;
-            continue;
-        }
-        buf[0] = str[i++];
-        buf[1] = str[i++];
-        value[j++] = (uint8_t)strtoul(buf, NULL, 16);
-    }
+	uint32_t sum = 0;
+	for (size_t i = 0; i < len; i++)
+		sum += buf[i];
+	return (uint8_t)(sum & 0xFF);
 }
 
-static void cccd_read_cb(struct gatt_db_attribute *attrib,
-				unsigned int id, uint16_t offset,
-				uint8_t opcode, struct bt_att *att,
-				void *user_data)
+static uint64_t monotonic_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000ULL);
+}
+
+static void improv_update_adv_state(void)
+{
+	if (!advertising)
+		return;
+	set_adv_data();
+}
+
+static void update_adv_mode(void)
+{
+	uint64_t now = monotonic_ms();
+
+	if (last_name_adv_time_ms == 0) {
+		last_name_adv_time_ms = now;
+		adv_name_active = true;
+		set_adv_data();
+		return;
+	}
+
+	if (adv_name_active) {
+		if (now - last_name_adv_time_ms >= NAME_ADVERTISING_DURATION_MS) {
+			adv_name_active = false;
+			set_adv_data();
+		}
+		return;
+	}
+
+	if (now - last_name_adv_time_ms >= NAME_ADVERTISING_INTERVAL_MS) {
+		adv_name_active = true;
+		last_name_adv_time_ms = now;
+		set_adv_data();
+	}
+}
+
+static void adv_rotate_cb(int timeout_id, void *user_data)
+{
+	if (!advertising)
+		return;
+	update_adv_mode();
+	adv_rotate_timeout_id = mainloop_add_timeout(1000, adv_rotate_cb, NULL, NULL);
+}
+
+static void improv_send_result(struct server *server, uint8_t cmd, const char **strings, size_t count)
+{
+	uint8_t out[512];
+	size_t idx = 0;
+
+	out[idx++] = cmd;
+	out[idx++] = 0; // data length placeholder
+
+	for (size_t i = 0; i < count; i++) {
+		size_t slen = strlen(strings[i]);
+		out[idx++] = (uint8_t)slen;
+		memcpy(&out[idx], strings[i], slen);
+		idx += slen;
+	}
+
+	out[1] = (uint8_t)(idx - 2);
+	out[idx++] = checksum8(out, idx);
+
+	pthread_mutex_lock(&server->notification_lock);
+	if (server->notifying && client_connected) {
+		send_notification_raw(server, out, idx, improv_chars.result_handle);
+	}
+	pthread_mutex_unlock(&server->notification_lock);
+}
+
+static void improv_notify_state(struct server *server)
+{
+	improv_update_adv_state();
+	uint8_t val = improv_state;
+	pthread_mutex_lock(&server->notification_lock);
+	if (server->notifying && client_connected) {
+		send_notification_raw(server, &val, 1, improv_chars.state_value_handle);
+	}
+	pthread_mutex_unlock(&server->notification_lock);
+}
+
+static void improv_notify_error(struct server *server)
+{
+	uint8_t val = improv_error;
+	pthread_mutex_lock(&server->notification_lock);
+	if (server->notifying && client_connected) {
+		send_notification_raw(server, &val, 1, improv_chars.error_value_handle);
+	}
+	pthread_mutex_unlock(&server->notification_lock);
+}
+
+static void improv_send_device_info(struct server *server)
+{
+	const char *fw_name = "ThirdReality";
+	const char *fw_ver = "unknown";
+	const char *hw = "trspk";
+	const char *dev_name = get_device_name();
+	const char *result_strs[] = { fw_name, fw_ver, hw, dev_name };
+
+	improv_send_result(server, 0x03, result_strs, 4);
+}
+
+static void improv_handle_rpc_packet(struct server *server, const uint8_t *value, size_t len)
+{
+	dump_hex("RPC full packet", value, len);
+	if (len < 3) {
+		improv_error = 0x01;
+		improv_notify_error(server);
+		return;
+	}
+
+	uint8_t cmd = value[0];
+	uint8_t dlen = value[1];
+
+	if (dlen + 3 != len) {
+		improv_error = 0x01;
+		improv_notify_error(server);
+		return;
+	}
+
+	if (checksum8(value, len - 1) != value[len - 1]) {
+		improv_error = 0x01;
+		improv_notify_error(server);
+		return;
+	}
+
+	if (cmd == 0x02) {
+		// Identify (no result)
+		improv_error = 0x00;
+		improv_notify_error(server);
+		return;
+	} else if (cmd == 0x03) {
+		// Device Info
+		improv_error = 0x00;
+		improv_notify_error(server);
+		improv_send_device_info(server);
+		return;
+	} else if (cmd != 0x01) {
+		improv_error = 0x02;
+		improv_notify_error(server);
+		return;
+	}
+
+	// Wi-Fi settings
+	const uint8_t *p = &value[2];
+	if (dlen < 2) {
+		improv_error = 0x01;
+		improv_notify_error(server);
+		return;
+	}
+
+	uint8_t ssid_len = p[0];
+	p++;
+	if ((size_t)(1 + ssid_len + 1) > dlen) {
+		improv_error = 0x01;
+		improv_notify_error(server);
+		return;
+	}
+
+	const char *ssid = (const char *)p;
+	p += ssid_len;
+
+	uint8_t pw_len = p[0];
+	p++;
+	if ((size_t)(1 + ssid_len + 1 + pw_len) > dlen) {
+		improv_error = 0x01;
+		improv_notify_error(server);
+		return;
+	}
+	const char *pw = (const char *)p;
+
+	char ssid_buf[128];
+	char pw_buf[128];
+	memset(ssid_buf, 0, sizeof(ssid_buf));
+	memset(pw_buf, 0, sizeof(pw_buf));
+
+	memcpy(ssid_buf, ssid, ssid_len);
+	memcpy(pw_buf, pw, pw_len);
+
+	improv_state = 0x03; // Provisioning
+	improv_error = 0x00;
+	improv_notify_state(server);
+
+	char ip[64] = { 0 };
+	if (process_wifi_config_improv(ssid_buf, pw_buf, ip, sizeof(ip)) == 0) {
+		improv_state = 0x04; // Provisioned
+		improv_error = 0x00;
+		improv_notify_state(server);
+
+		char url[96];
+		snprintf(url, sizeof(url), "http://%s", ip);
+		const char *result_strs[] = { url };
+		improv_send_result(server, cmd, result_strs, 1);
+
+		wifi_config_completed = true;
+		mainloop_add_timeout(2000, delayed_exit_cb, NULL, NULL);
+	} else {
+		improv_state = 0x02; // Authorized
+		improv_error = 0x03; // Unable to connect
+		improv_notify_state(server);
+		improv_notify_error(server);
+
+		const char *result_strs[] = { "" };
+		improv_send_result(server, cmd, result_strs, 1);
+	}
+}
+
+static void improv_write_rpc_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, const uint8_t *value,
+				size_t len, uint8_t opcode, struct bt_att *att, void *user_data)
 {
 	struct server *server = user_data;
-	uint8_t value[2] = {0, 0};
+
+	if (len > 0 && value)
+		dump_hex("RPC write chunk", value, len);
+	if (opcode != BT_ATT_OP_WRITE_CMD)
+		gatt_db_attribute_write_result(attrib, id, 0);
+
+	if (opcode == BT_ATT_OP_PREP_WRITE_REQ) {
+		if (len > 0) {
+			if (offset + len > MAX_WRITE_BUFFER) {
+				printf("[RPC] prep_write overflow offset=%u len=%zu\n", offset, len);
+				server->write_buffer_len = 0;
+				server->write_in_progress = false;
+				return;
+			}
+			memcpy(server->write_buffer + offset, value, len);
+			if (offset + len > server->write_buffer_len)
+				server->write_buffer_len = offset + len;
+		}
+		server->write_in_progress = true;
+		return;
+	} else if (opcode == BT_ATT_OP_EXEC_WRITE_REQ) {
+		if (len == 0) {
+			if (!server->write_in_progress || server->write_buffer_len == 0) {
+				printf("[RPC] exec_write with empty buffer\n");
+				return;
+			}
+			dump_hex("RPC exec buffer", server->write_buffer, server->write_buffer_len);
+			server->write_in_progress = false;
+			improv_handle_rpc_packet(server, server->write_buffer, server->write_buffer_len);
+			server->write_buffer_len = 0;
+			return;
+		}
+		/* Some stacks send full data in EXEC_WRITE; treat it as normal write below. */
+	}
+
+	// WRITE_REQ or WRITE_CMD
+	if (offset != 0)
+		return;
+
+	if (len + server->write_buffer_len > MAX_WRITE_BUFFER) {
+		printf("[RPC] write overflow len=%zu buf_len=%zu\n", len, server->write_buffer_len);
+		server->write_buffer_len = 0;
+		return;
+	}
+	memcpy(server->write_buffer + server->write_buffer_len, value, len);
+	server->write_buffer_len += len;
+
+	// If we have at least cmd + len, compute total length
+	if (server->write_buffer_len >= 2) {
+		size_t total = (size_t)server->write_buffer[1] + 3;
+		if (server->write_buffer_len >= total) {
+			improv_handle_rpc_packet(server, server->write_buffer, total);
+			// shift any extra bytes (unlikely)
+			if (server->write_buffer_len > total) {
+				memmove(server->write_buffer, server->write_buffer + total, server->write_buffer_len - total);
+				server->write_buffer_len -= total;
+			} else {
+				server->write_buffer_len = 0;
+			}
+		}
+	}
+}
+
+/* Use BlueZ's built-in UUID parsing for GATT services */
+static void parse_uuid_string(const char *str, bt_uuid_t *uuid)
+{
+	bt_string_to_uuid(uuid, str);
+}
+
+/* Parse UUID string to raw bytes in little-endian for BLE advertising */
+static void uuid_str_to_le_bytes(const char *str, uint8_t *out)
+{
+	if (strlen(str) != 36) {
+		return;
+	}
+
+	/* Parse UUID string to big-endian bytes first */
+	uint8_t tmp[16];
+	int i = 0, j = 0;
+	char buf[3] = { 0 };
+
+	while (i < 36 && j < 16) {
+		if (str[i] == '-') {
+			i++;
+			continue;
+		}
+		buf[0] = str[i++];
+		buf[1] = str[i++];
+		tmp[j++] = (uint8_t)strtoul(buf, NULL, 16);
+	}
+
+	/* Reverse to little-endian for BLE advertising */
+	for (int k = 0; k < 16; k++) {
+		out[k] = tmp[15 - k];
+	}
+}
+
+static void cccd_read_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, uint8_t opcode, struct bt_att *att,
+			 void *user_data)
+{
+	struct server *server = user_data;
+	uint8_t value[2] = { 0, 0 };
 
 	if (server->notifying) {
 		value[0] = 0x01;
@@ -545,12 +663,10 @@ static void cccd_read_cb(struct gatt_db_attribute *attrib,
 	gatt_db_attribute_read_result(attrib, id, 0, value, 2);
 }
 
-static void cccd_write_cb(struct gatt_db_attribute *attrib,
-				unsigned int id, uint16_t offset,
-				const uint8_t *value, size_t len,
-				uint8_t opcode, struct bt_att *att,
-				void *user_data)
+static void cccd_write_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, const uint8_t *value, size_t len,
+			  uint8_t opcode, struct bt_att *att, void *user_data)
 {
+	uint16_t cccd_handle = gatt_db_attribute_get_handle(attrib);
 	struct server *server = user_data;
 
 	if (len != 2) {
@@ -565,195 +681,286 @@ static void cccd_write_cb(struct gatt_db_attribute *attrib,
 	if (cccd_value & 0x01) {
 		server->notifying = true;
 		server->notification_ready = true;
+		server->notify_confirm = false;
 	} else if (cccd_value & 0x02) {
 		server->notifying = true;
 		server->notification_ready = true;
+		server->notify_confirm = true;
 	} else {
 		server->notifying = false;
 		server->notification_ready = false;
+		server->notify_confirm = false;
 	}
 
 	pthread_mutex_unlock(&server->notification_lock);
 	gatt_db_attribute_write_result(attrib, id, 0);
+
+	/*
+	 * Check if this is an Improv CCCD (not GATT Service Changed CCCD).
+	 * We use a dynamic check: compare cccd_handle against the known Improv value handles.
+	 * The CCCD for a characteristic is typically at (value_handle + 1).
+	 * 
+	 * State CCCD: state_value_handle + 1
+	 * Error CCCD: error_value_handle + 1  
+	 * Result CCCD: result_handle + 1
+	 */
+	uint16_t state_cccd = improv_chars.state_value_handle + 1;
+	uint16_t error_cccd = improv_chars.error_value_handle + 1;
+	uint16_t result_cccd = improv_chars.result_handle + 1;
+	
+	bool is_improv_cccd = (cccd_handle == state_cccd || 
+	                       cccd_handle == error_cccd || 
+	                       cccd_handle == result_cccd);
+	
+	if (is_improv_cccd && client_connected && (cccd_value & 0x03)) {
+		/* Send state notification with a small delay */
+		usleep(50000);
+		improv_notify_state(server);
+		usleep(100000);
+		improv_notify_error(server);
+	}
 }
 
-static void gap_device_name_read_cb(struct gatt_db_attribute *attrib,
-                unsigned int id, uint16_t offset,
-                uint8_t opcode, struct bt_att *att,
-                void *user_data)
+static void gap_device_name_read_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, uint8_t opcode,
+				    struct bt_att *att, void *user_data)
 {
-    const char *name = get_device_name();
-    uint16_t len = strlen(name);
+	const char *name = get_device_name();
+	uint16_t len = strlen(name);
 
-    if (offset > len) {
-        gatt_db_attribute_read_result(attrib, id, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0);
-        return;
-    }
+	if (offset > len) {
+		gatt_db_attribute_read_result(attrib, id, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0);
+		return;
+	}
 
-    len -= offset;
-    gatt_db_attribute_read_result(attrib, id, 0, (uint8_t *)(name + offset), len);
+	len -= offset;
+	gatt_db_attribute_read_result(attrib, id, 0, (uint8_t *)(name + offset), len);
 }
 
-static void gap_appearance_read_cb(struct gatt_db_attribute *attrib,
-                unsigned int id, uint16_t offset,
-                uint8_t opcode, struct bt_att *att,
-                void *user_data)
+static void gap_appearance_read_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, uint8_t opcode,
+				   struct bt_att *att, void *user_data)
 {
-    uint8_t appearance[2] = { 0x00, 0x00 }; // Unknown appearance
+	uint8_t appearance[2] = { 0x00, 0x00 }; // Unknown appearance
 
-    if (offset > 2) {
-        gatt_db_attribute_read_result(attrib, id, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0);
-        return;
-    }
+	if (offset > 2) {
+		gatt_db_attribute_read_result(attrib, id, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0);
+		return;
+	}
 
-    gatt_db_attribute_read_result(attrib, id, 0, appearance + offset, 2 - offset);
+	gatt_db_attribute_read_result(attrib, id, 0, appearance + offset, 2 - offset);
 }
 
 static void populate_gap_service(struct server *server)
 {
-    struct gatt_db_attribute *service;
-    bt_uuid_t uuid;
+	struct gatt_db_attribute *service;
+	bt_uuid_t uuid;
 
-    bt_uuid16_create(&uuid, 0x1800);
-    service = gatt_db_add_service(server->db, &uuid, true, 6);
+	bt_uuid16_create(&uuid, 0x1800);
+	service = gatt_db_add_service(server->db, &uuid, true, 6);
 
-    bt_uuid16_create(&uuid, 0x2A00);
-    gatt_db_service_add_characteristic(service, &uuid,
-            BT_ATT_PERM_READ,
-            BT_GATT_CHRC_PROP_READ,
-            gap_device_name_read_cb, NULL, server);
+	bt_uuid16_create(&uuid, 0x2A00);
+	gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ, BT_GATT_CHRC_PROP_READ, gap_device_name_read_cb, NULL,
+					   server);
 
-    bt_uuid16_create(&uuid, 0x2A01);
-    gatt_db_service_add_characteristic(service, &uuid,
-            BT_ATT_PERM_READ,
-            BT_GATT_CHRC_PROP_READ,
-            gap_appearance_read_cb, NULL, server);
+	bt_uuid16_create(&uuid, 0x2A01);
+	gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ, BT_GATT_CHRC_PROP_READ, gap_appearance_read_cb, NULL,
+					   server);
 
-    gatt_db_service_set_active(service, true);
-    printf("[DEBUG] GAP service populated\n");
+	gatt_db_service_set_active(service, true);
 }
 
 static void populate_gatt_service(struct server *server)
 {
-    struct gatt_db_attribute *service, *characteristic;
-    bt_uuid_t uuid;
+	struct gatt_db_attribute *service, *characteristic;
+	bt_uuid_t uuid;
 
-    bt_uuid16_create(&uuid, 0x1801);
-    service = gatt_db_add_service(server->db, &uuid, true, 6);
+	bt_uuid16_create(&uuid, 0x1801);
+	/* Simplified: only Service Changed, no extra features */
+	service = gatt_db_add_service(server->db, &uuid, true, 4);
 
-    bt_uuid16_create(&uuid, 0x2A05);
-    characteristic = gatt_db_service_add_characteristic(service, &uuid,
-            BT_ATT_PERM_READ,
-            BT_GATT_CHRC_PROP_INDICATE,
-            NULL, NULL, server);
+	// Service Changed (0x2A05) - Indicate only (required by BT spec)
+	bt_uuid16_create(&uuid, 0x2A05);
+	characteristic = gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ, BT_GATT_CHRC_PROP_INDICATE, NULL,
+						    NULL, server);
+	gatt_db_service_add_ccc(characteristic, BT_ATT_PERM_READ | BT_ATT_PERM_WRITE);
 
-    bt_uuid16_create(&uuid, 0x2902);
-    gatt_db_service_add_descriptor(characteristic, &uuid,
-            BT_ATT_PERM_READ | BT_ATT_PERM_WRITE,
-            cccd_read_cb, cccd_write_cb, server);
-
-    gatt_db_service_set_active(service, true);
+	gatt_db_service_set_active(service, true);
 }
 
-static void populate_wifi_service(struct server *server)
+static void improv_read_caps_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, uint8_t opcode,
+				struct bt_att *att, void *user_data)
 {
-    struct gatt_db_attribute *service, *characteristic;
-    bt_uuid_t uuid;
-    uint128_t uuid_value;
+	if (offset > 1) {
+		gatt_db_attribute_read_result(attrib, id, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0);
+		return;
+	}
+	uint8_t val = improv_caps;
+	gatt_db_attribute_read_result(attrib, id, 0, &val, 1);
+}
 
-    gatt_db_ccc_register(server->db, cccd_read_cb, cccd_write_cb, NULL, server);
+static void improv_read_state_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, uint8_t opcode,
+				 struct bt_att *att, void *user_data)
+{
+	if (offset > 1) {
+		gatt_db_attribute_read_result(attrib, id, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0);
+		return;
+	}
+	uint8_t val = improv_state;
+	gatt_db_attribute_read_result(attrib, id, 0, &val, 1);
+}
 
-    str2uuid(SERVICE_UUID_STR, (uint8_t *)&uuid_value, 16);
-    bt_uuid128_create(&uuid, uuid_value);
+static void improv_read_error_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, uint8_t opcode,
+				 struct bt_att *att, void *user_data)
+{
+	if (offset > 1) {
+		gatt_db_attribute_read_result(attrib, id, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0);
+		return;
+	}
+	uint8_t val = improv_error;
+	gatt_db_attribute_read_result(attrib, id, 0, &val, 1);
+}
 
-    service = gatt_db_add_service(server->db, &uuid, true, 16);
-    if (!service) {
-        printf("[ERROR] Failed to create WiFi service!\n");
-        return;
-    }
+static void improv_read_result_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, uint8_t opcode,
+				  struct bt_att *att, void *user_data)
+{
+	/* Result is empty until RPC command is processed */
+	gatt_db_attribute_read_result(attrib, id, 0, NULL, 0);
+}
 
-    str2uuid(WIFI_CONFIG_CHAR_UUID_STR, (uint8_t *)&uuid_value, 16);
-    bt_uuid128_create(&uuid, uuid_value);
+static void populate_improv_service(struct server *server)
+{
+	struct gatt_db_attribute *service, *characteristic;
+	bt_uuid_t uuid;
 
-    characteristic = gatt_db_service_add_characteristic(service, &uuid,
-            BT_ATT_PERM_WRITE,
-            BT_GATT_CHRC_PROP_WRITE | BT_GATT_CHRC_PROP_WRITE_WITHOUT_RESP | BT_GATT_CHRC_PROP_NOTIFY,
-            NULL, wifi_config_write_cb, server);
+	gatt_db_ccc_register(server->db, cccd_read_cb, cccd_write_cb, NULL, server);
 
-    if (!characteristic) {
-        printf("[ERROR] Failed to create WiFi characteristic!\n");
-        return;
-    }
+	parse_uuid_string(IMPROV_SERVICE_UUID_STR, &uuid);
 
-    if (!gatt_db_service_add_ccc(characteristic, BT_ATT_PERM_READ | BT_ATT_PERM_WRITE)) {
-        printf("[ERROR] Failed to add WiFi CCCD descriptor!\n");
-        return;
-    }
+	/*
+	 * IMPORTANT: Allocate enough handles for all characteristics + descriptors.
+	 * Each characteristic needs: 1 (declaration) + 1 (value) = 2 handles minimum
+	 * Each CCCD descriptor needs: 1 handle
+	 * 
+	 * We have 5 characteristics:
+	 * - Current State: 2 (char) + 1 (CCCD) = 3 handles
+	 * - Error State: 2 (char) + 1 (CCCD) = 3 handles
+	 * - RPC Command: 2 (char) = 2 handles
+	 * - RPC Result: 2 (char) + 1 (CCCD) = 3 handles
+	 * - Capabilities: 2 (char) = 2 handles
+	 * Total: 13 handles + 1 (service declaration) = 14, use 20 for safety
+	 */
+	service = gatt_db_add_service(server->db, &uuid, true, 20);
+	if (!service) {
+		return;
+	}
 
-    server->wifi_chara_att = characteristic;
-    server->wifi_chara_handle = gatt_db_attribute_get_handle(characteristic);
+	/*
+	 * CRITICAL FIX: Register characteristics in UUID order (8001, 8002, 8003, 8004, 8005)
+	 * to match Improv WiFi specification and what Android Improv SDK expects.
+	 * Some Android BLE stacks may depend on characteristic order within a service.
+	 */
 
-    if (!gatt_db_service_set_active(service, true)) {
-        printf("[ERROR] Failed to activate WiFi service!\n");
-        return;
-    }
+	// 1. Current State (UUID: ...8001) - read + notify - per Improv spec
+	parse_uuid_string(IMPROV_CHAR_STATE_UUID_STR, &uuid);
+	characteristic = gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ,
+								    BT_GATT_CHRC_PROP_READ | BT_GATT_CHRC_PROP_NOTIFY,
+								    improv_read_state_cb, NULL, server);
+	gatt_db_service_add_ccc(characteristic, BT_ATT_PERM_READ | BT_ATT_PERM_WRITE);
+	improv_chars.state = characteristic;
+	improv_chars.state_value_handle = gatt_db_attribute_get_handle(characteristic);
+
+	// 2. Error State (UUID: ...8002) - read + notify - per Improv spec
+	parse_uuid_string(IMPROV_CHAR_ERROR_UUID_STR, &uuid);
+	characteristic = gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ,
+								    BT_GATT_CHRC_PROP_READ | BT_GATT_CHRC_PROP_NOTIFY,
+								    improv_read_error_cb, NULL, server);
+	gatt_db_service_add_ccc(characteristic, BT_ATT_PERM_READ | BT_ATT_PERM_WRITE);
+	improv_chars.error = characteristic;
+	improv_chars.error_value_handle = gatt_db_attribute_get_handle(characteristic);
+
+	// 3. RPC Command (UUID: ...8003) - write only - per Improv spec
+	// IMPORTANT: prefer Write Request to allow long writes (prepare/execute) when MTU is small
+	parse_uuid_string(IMPROV_CHAR_RPC_UUID_STR, &uuid);
+	characteristic = gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_WRITE,
+				    BT_GATT_CHRC_PROP_WRITE,
+						    NULL, improv_write_rpc_cb, server);
+	improv_chars.rpc = characteristic;
+
+	// 4. RPC Result (UUID: ...8004) - read + notify - per Improv spec
+	parse_uuid_string(IMPROV_CHAR_RESULT_UUID_STR, &uuid);
+	characteristic = gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ,
+							    BT_GATT_CHRC_PROP_READ | BT_GATT_CHRC_PROP_NOTIFY,
+							    improv_read_result_cb, NULL, server);
+	gatt_db_service_add_ccc(characteristic, BT_ATT_PERM_READ | BT_ATT_PERM_WRITE);
+	improv_chars.result = characteristic;
+	improv_chars.result_handle = gatt_db_attribute_get_handle(characteristic);
+
+	// 5. Capabilities (UUID: ...8005) - read only - per Improv spec
+	parse_uuid_string(IMPROV_CHAR_CAPS_UUID_STR, &uuid);
+	characteristic = gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ, BT_GATT_CHRC_PROP_READ,
+							    improv_read_caps_cb, NULL, server);
+	improv_chars.cap = characteristic;
+	if (!gatt_db_service_set_active(service, true)) {
+		return;
+	}
 }
 
 static struct server *server_create(int fd)
 {
 	struct server *server;
 
-    server = malloc(sizeof(*server));
+	server = malloc(sizeof(*server));
 	if (!server) {
-        printf("[DEBUG] Failed to allocate server\n");
 		return NULL;
 	}
 
-    memset(server, 0, sizeof(*server));
-    server->fd = fd;
+	memset(server, 0, sizeof(*server));
+	server->fd = fd;
 
 	server->att = bt_att_new(fd, false);
 	if (!server->att) {
-        printf("[DEBUG] Failed to create ATT\n");
-        free(server);
-        return NULL;
+		free(server);
+		return NULL;
 	}
 
 	if (!bt_att_set_close_on_unref(server->att, true)) {
-        printf("[DEBUG] Failed to set close on unref\n");
-        bt_att_unref(server->att);
-        free(server);
-        return NULL;
-    }
+		bt_att_unref(server->att);
+		free(server);
+		return NULL;
+	}
 
-    bt_att_register_disconnect(server->att, att_disconnect_cb, server, NULL);
+	bt_att_register_disconnect(server->att, att_disconnect_cb, server, NULL);
+
+	/* 
+	 * Use default MTU (23 bytes). Do NOT force a large MTU before negotiation!
+	 * Android will negotiate MTU via Exchange MTU Request if needed.
+	 * Forcing large MTU causes service discovery responses to be truncated.
+	 */
 
 	server->db = gatt_db_new();
 	if (!server->db) {
-        printf("[DEBUG] Failed to create GATT DB\n");
-        bt_att_unref(server->att);
-        free(server);
-        return NULL;
+		bt_att_unref(server->att);
+		free(server);
+		return NULL;
 	}
 
+	/* Use default MTU of 23 bytes, let client negotiate higher if needed */
 	server->gatt = bt_gatt_server_new(server->db, server->att, 23, 0);
 	if (!server->gatt) {
-        printf("[DEBUG] Failed to create GATT server\n");
-        gatt_db_unref(server->db);
-        bt_att_unref(server->att);
-        free(server);
-        return NULL;
+		gatt_db_unref(server->db);
+		bt_att_unref(server->att);
+		free(server);
+		return NULL;
 	}
 
-    server->notifying = false;
-    server->notification_ready = false;
-    pthread_mutex_init(&server->notification_lock, NULL);
+	server->notifying = false;
+	server->notification_ready = false;
+	pthread_mutex_init(&server->notification_lock, NULL);
 
-    populate_gap_service(server);
-    populate_gatt_service(server);
+	populate_gap_service(server);
+	populate_gatt_service(server);
+	populate_improv_service(server);
 
-    populate_wifi_service(server);
-    return server;
+	return server;
 }
 
 static void server_destroy(struct server *server)
@@ -762,14 +969,12 @@ static void server_destroy(struct server *server)
 	gatt_db_unref(server->db);
 }
 
-static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec,
-		uint8_t src_type)
+static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec, uint8_t src_type)
 {
 	int sk, nsk;
 	struct sockaddr_l2 srcaddr, addr;
 	socklen_t optlen;
 	struct bt_security btsec;
-	char ba[18];
 
 	sk = socket(PF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
 	if (sk < 0) {
@@ -782,15 +987,14 @@ static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec,
 	srcaddr.l2_cid = htobs(ATT_CID);
 	srcaddr.l2_bdaddr_type = src_type;
 	bacpy(&srcaddr.l2_bdaddr, src);
-	if (bind(sk, (struct sockaddr *) &srcaddr, sizeof(srcaddr)) < 0) {
+	if (bind(sk, (struct sockaddr *)&srcaddr, sizeof(srcaddr)) < 0) {
 		perror("Failed to bind L2CAP socket");
 		goto fail;
 	}
 
 	memset(&btsec, 0, sizeof(btsec));
 	btsec.level = sec;
-	if (setsockopt(sk, SOL_BLUETOOTH, BT_SECURITY, &btsec,
-				sizeof(btsec)) != 0) {
+	if (setsockopt(sk, SOL_BLUETOOTH, BT_SECURITY, &btsec, sizeof(btsec)) != 0) {
 		fprintf(stderr, "Failed to set L2CAP security level\n");
 		goto fail;
 	}
@@ -802,7 +1006,6 @@ static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec,
 
 	fd_set readfds;
 	int max_fd = sk;
-	int select_count = 0;
 	time_t start_time = time(NULL);
 
 	sigset_t empty_mask;
@@ -817,7 +1020,6 @@ static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec,
 		timeout.tv_nsec = 0;
 
 		int ret = pselect(max_fd + 1, &readfds, NULL, NULL, &timeout, &empty_mask);
-		select_count++;
 
 		time_t current_time = time(NULL);
 		if (current_time - start_time >= NO_CLIENT_TIMEOUT_SECONDS) {
@@ -833,31 +1035,26 @@ static int l2cap_le_att_listen_and_accept(bdaddr_t *src, int sec,
 			goto fail;
 		} else if (ret == 0) {
 			if (should_exit) {
-				printf("[SELECT] should_exit detected during timeout, breaking\n");
 				break;
 			}
 			continue;
 		} else if (FD_ISSET(sk, &readfds)) {
-			printf("[SELECT] Socket ready for accept (count: %d)\n", select_count);
 			break;
 		}
 	}
 
 	if (should_exit) {
-		printf("Exiting before accepting connection\n");
 		goto fail;
 	}
 
 	memset(&addr, 0, sizeof(addr));
 	optlen = sizeof(addr);
-	nsk = accept(sk, (struct sockaddr *) &addr, &optlen);
+	nsk = accept(sk, (struct sockaddr *)&addr, &optlen);
 	if (nsk < 0) {
 		perror("Accept failed");
 		goto fail;
 	}
 
-	ba2str(&addr.l2_bdaddr, ba);
-	printf("Connect from %s\n", ba);
 	close(sk);
 
 	return nsk;
@@ -869,71 +1066,58 @@ fail:
 
 static void signal_handler(int signum)
 {
-    const char msg[] = "\n[SIGNAL] Signal received, setting should_exit = true\n";
-    write(STDOUT_FILENO, msg, sizeof(msg) - 1);
+	switch (signum) {
+	case SIGINT: {
+		should_exit = true;
+		mainloop_quit();
+		break;
+	}
+	case SIGTERM: {
+		if (advertising) {
+			struct bt_hci_cmd_le_set_adv_enable param;
+			param.enable = 0;
 
-    switch (signum) {
-    case SIGINT:
-        {
-            const char sigint_msg[] = "[SIGNAL] SIGINT (Ctrl+C) received!\n";
-            write(STDOUT_FILENO, sigint_msg, sizeof(sigint_msg) - 1);
-            should_exit = true;
-            mainloop_quit();
-            break;
-        }
-    case SIGTERM:
-        {
-            const char sigterm_msg[] = "[SIGNAL] SIGTERM received!\n";
-            write(STDOUT_FILENO, sigterm_msg, sizeof(sigterm_msg) - 1);
+			int hdev = hci_get_route(NULL);
+			if (hdev >= 0) {
+				int dd = hci_open_dev(hdev);
+				if (dd >= 0) {
+					struct hci_request rq;
+					uint8_t status;
+					memset(&rq, 0, sizeof(rq));
+					rq.ogf = OGF_LE_CTL;
+					rq.ocf = BT_HCI_CMD_LE_SET_ADV_ENABLE;
+					rq.cparam = &param;
+					rq.clen = sizeof(param);
+					rq.rparam = &status;
+					rq.rlen = 1;
+					hci_send_req(dd, &rq, 1000);
+					hci_close_dev(dd);
+				}
+			}
+			advertising = false;
+		}
 
-            if (advertising) {
-                const char adv_msg[] = "[SIGNAL] Stopping advertising due to SIGTERM\n";
-                write(STDOUT_FILENO, adv_msg, sizeof(adv_msg) - 1);
-
-                struct bt_hci_cmd_le_set_adv_enable param;
-                param.enable = 0;
-
-                int hdev = hci_get_route(NULL);
-                if (hdev >= 0) {
-                    int dd = hci_open_dev(hdev);
-                    if (dd >= 0) {
-                        struct hci_request rq;
-                        uint8_t status;
-                        memset(&rq, 0, sizeof(rq));
-                        rq.ogf = OGF_LE_CTL;
-                        rq.ocf = BT_HCI_CMD_LE_SET_ADV_ENABLE;
-                        rq.cparam = &param;
-                        rq.clen = sizeof(param);
-                        rq.rparam = &status;
-                        rq.rlen = 1;
-                        hci_send_req(dd, &rq, 1000);
-                        hci_close_dev(dd);
-                    }
-                }
-                advertising = false;
-            }
-
-            should_exit = true;
-            mainloop_quit();
-            break;
-        }
-    default:
-        break;
-    }
+		should_exit = true;
+		mainloop_quit();
+		break;
+	}
+	default:
+		break;
+	}
 }
 
 static void signal_cb(int signum, void *user_data)
 {
-    switch (signum) {
-    case SIGINT:
-    case SIGTERM:
-        printf("\n  [SIGNAL] Received termination signal (%d)\n", signum);
-        should_exit = true;
-        mainloop_quit();
-        break;
-    default:
-        break;
-    }
+	(void)user_data;
+	switch (signum) {
+	case SIGINT:
+	case SIGTERM:
+		should_exit = true;
+		mainloop_quit();
+		break;
+	default:
+		break;
+	}
 }
 
 static void send_cmd(int cmd, void *params, int params_len)
@@ -962,77 +1146,85 @@ static void send_cmd(int cmd, void *params, int params_len)
 	rq.rparam = &status;
 	rq.rlen = 1;
 
-    hci_send_req(dd, &rq, 1000);
-    hci_close_dev(dd);
+	hci_send_req(dd, &rq, 1000);
+	hci_close_dev(dd);
 }
 
-static char device_name_cache[32] = {0};
+static char device_name_cache[32] = { 0 };
 static bool device_name_initialized = false;
 
-static const char* get_device_name(void)
+static const char *get_device_name(void)
 {
-    if (device_name_initialized) {
-        return device_name_cache;
-    }
+	if (device_name_initialized) {
+		return device_name_cache;
+	}
 
-    FILE* fp = fopen("/data/conf/device.json", "r");
-    if (fp) {
-        fseek(fp, 0, SEEK_END);
-        long file_size = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-        
-        if (file_size > 0 && file_size < 1024 * 1024) {
-            char *content = malloc(file_size + 1);
-            if (content) {
-                size_t read_size = fread(content, 1, file_size, fp);
-                content[read_size] = '\0';
+	/* Build device name from /data/conf/device.json: 3RSPK-xxxxxx */
+	const char *default_name = "3RSPK-000000";
+	FILE *fp = fopen("/data/conf/device.json", "r");
+	if (!fp) {
+		snprintf(device_name_cache, sizeof(device_name_cache), "%s", default_name);
+		device_name_initialized = true;
+		return device_name_cache;
+	}
 
-                cJSON *root = cJSON_Parse(content);
-                free(content);
+	fseek(fp, 0, SEEK_END);
+	long size = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
 
-                if (root) {
-                    cJSON *device = cJSON_GetObjectItem(root, "device");
-                    cJSON *name_item = device ? cJSON_GetObjectItem(device, "name") : NULL;
+	char *content = malloc(size + 1);
+	if (!content) {
+		fclose(fp);
+		snprintf(device_name_cache, sizeof(device_name_cache), "%s", default_name);
+		device_name_initialized = true;
+		return device_name_cache;
+	}
 
-                    if (name_item && cJSON_IsString(name_item)) {
-                        char *name_str = name_item->valuestring;
-                        size_t name_len = strlen(name_str);
-                        if (name_len > 0 && name_len < sizeof(device_name_cache)) {
-                            strncpy(device_name_cache, name_str, sizeof(device_name_cache) - 1);
-                            device_name_cache[sizeof(device_name_cache) - 1] = '\0';
-                            printf("[DEBUG] device name: %s\n", device_name_cache);
-                            cJSON_Delete(root);
-                            fclose(fp);
-                            device_name_initialized = true;
-                            return device_name_cache;
-                        }
-                    }
-                    cJSON_Delete(root);
-                }
-            }
-        }
-        fclose(fp);
-    }
+	fread(content, 1, size, fp);
+	content[size] = '\0';
+	fclose(fp);
 
-    printf("[DEVICE_NAME] Failed to read from device.json, using fallback\n");
-    time_t now = time(NULL);
-    snprintf(device_name_cache, sizeof(device_name_cache), 
-            "3RSPK-%04lX", (unsigned long)(now & 0xFFFF));
-    printf("[DEVICE_NAME] Generated from timestamp: %s\n", device_name_cache);
+	cJSON *root = cJSON_Parse(content);
+	free(content);
+	if (!root) {
+		snprintf(device_name_cache, sizeof(device_name_cache), "%s", default_name);
+		device_name_initialized = true;
+		return device_name_cache;
+	}
 
-    device_name_initialized = true;
-    return device_name_cache;
+	cJSON *device = cJSON_GetObjectItem(root, "device");
+	cJSON *mac = device ? cJSON_GetObjectItem(device, "macAddress") : NULL;
+	if (mac && cJSON_IsString(mac) && mac->valuestring) {
+		char compact[13] = { 0 };
+		int ci = 0;
+		for (const char *p = mac->valuestring; *p && ci < 12; p++) {
+			if (*p == ':')
+				continue;
+			compact[ci++] = *p;
+		}
+		if (ci >= 6) {
+			const char *last6 = compact + (ci - 6);
+			snprintf(device_name_cache, sizeof(device_name_cache), "3RSPK-%s", last6);
+		} else {
+			snprintf(device_name_cache, sizeof(device_name_cache), "%s", default_name);
+		}
+	} else {
+		snprintf(device_name_cache, sizeof(device_name_cache), "%s", default_name);
+	}
+
+	cJSON_Delete(root);
+	device_name_initialized = true;
+	return device_name_cache;
 }
 
 static void set_adv_parameters(void)
 {
 	struct bt_hci_cmd_le_set_adv_parameters param;
 
-    param.own_addr_type = 0x00;    /* Use public address */
-    // Use much longer intervals for maximum stability against timeouts
-	param.min_interval = cpu_to_le16(0x0100);  // 160ms for maximum stability
-	param.max_interval = cpu_to_le16(0x0200);  // 320ms for very slow but stable advertising
-    param.type = 0x00;        /* connectable no-direct advertising */
+	param.own_addr_type = 0x00; /* Use public address */
+	param.min_interval = cpu_to_le16(0x00A0); // ~100ms
+	param.max_interval = cpu_to_le16(0x00F0); // ~150ms
+	param.type = 0x00; /* connectable no-direct advertising */
 	param.direct_addr_type = 0x00;
 	memset(param.direct_addr, 0, 6);
 	param.channel_map = 0x07;
@@ -1043,68 +1235,74 @@ static void set_adv_parameters(void)
 
 static void set_adv_enable(int enable)
 {
-    struct bt_hci_cmd_le_set_adv_enable param;
-    if (enable !=0 && enable != 1) {
-        printf("%s: invalid arg: %d\n", __func__, enable);
-        return;
-    }
-    param.enable = enable;
-    send_cmd(BT_HCI_CMD_LE_SET_ADV_ENABLE, (void *)&param, sizeof(param));
+	struct bt_hci_cmd_le_set_adv_enable param;
+	if (enable != 0 && enable != 1) {
+		return;
+	}
+	param.enable = enable;
+	send_cmd(BT_HCI_CMD_LE_SET_ADV_ENABLE, (void *)&param, sizeof(param));
 }
 
 static void set_adv_response(void)
 {
-    struct bt_hci_cmd_le_set_scan_rsp_data param;
-    const char *device_name = get_device_name();
+	struct bt_hci_cmd_le_set_scan_rsp_data param;
+	const char *device_name = get_device_name();
 
-    memset(&param, 0, sizeof(param));
-    param.len = 0;
+	memset(&param, 0, sizeof(param));
+	param.len = 0;
 
-    size_t name_len = strlen(device_name);
-    if (name_len > 29) {
-        name_len = 29;
-        printf("[ADV] Device name truncated to %zu characters\n", name_len);
-    }
+	size_t name_len = strlen(device_name);
+	if (name_len > 29) {
+		name_len = 29;
+	}
 
-    param.data[param.len++] = name_len + 1;  // Length including type
-    param.data[param.len++] = 0x09;          // Complete Local Name
-    memcpy(&param.data[param.len], device_name, name_len);
-    param.len += name_len;
+	// Complete Local Name in scan response (full device name)
+	param.data[param.len++] = name_len + 1;
+	param.data[param.len++] = 0x09; // Complete Local Name
+	memcpy(&param.data[param.len], device_name, name_len);
+	param.len += name_len;
 
-    send_cmd(BT_HCI_CMD_LE_SET_SCAN_RSP_DATA, &param, sizeof(param));
+	send_cmd(BT_HCI_CMD_LE_SET_SCAN_RSP_DATA, &param, sizeof(param));
 }
 
 static void set_adv_data(void)
 {
-    struct bt_hci_cmd_le_set_adv_data param;
-    uint128_t uuid_value;
+	struct bt_hci_cmd_le_set_adv_data param;
 
-    memset(&param, 0, sizeof(param));
-    param.len = 0;
+	memset(&param, 0, sizeof(param));
+	param.len = 0;
 
-    param.data[param.len++] = 2;
-    param.data[param.len++] = 0x01;
-    param.data[param.len++] = 0x04;  // LE General Discoverable Mode
+	// Flags (3 bytes): LE General Discoverable + BR/EDR Not Supported
+	param.data[param.len++] = 2;
+	param.data[param.len++] = 0x01;
+	param.data[param.len++] = 0x06;
 
-    str2uuid(SERVICE_UUID_STR, (uint8_t *)&uuid_value, 16);
-    param.data[param.len++] = 17;  // Length: 1 byte type + 16 bytes UUID
-    param.data[param.len++] = 0x07;  // Complete List of 128-bit Service UUIDs
-    for (int i = 0; i < 16; i++) {
-        param.data[param.len + i] = ((uint8_t *)&uuid_value)[15 - i];
-    }
-    param.len += 16;
+	// Improv Service UUID 128-bit (18 bytes) - REQUIRED by Improv spec
+	uint8_t uuid_bytes[16];
+	uuid_str_to_le_bytes(IMPROV_SERVICE_UUID_STR, uuid_bytes);
+	param.data[param.len++] = 17;
+	param.data[param.len++] = 0x07;  // Complete List of 128-bit Service UUIDs
+	memcpy(&param.data[param.len], uuid_bytes, 16);
+	param.len += 16;
 
-    // Add TX power
-    param.data[param.len++] = 2;
-    param.data[param.len++] = 0x0A;
-    param.data[param.len++] = 0x00;
+	// Improv Service Data (10 bytes): UUID(2) + header(2) + state(1) + caps(1) + reserved(4)
+	param.data[param.len++] = 9;
+	param.data[param.len++] = 0x16; // Service Data - 16-bit UUID
+	param.data[param.len++] = 0x77; // UUID 0x4677 (LSB) - Improv
+	param.data[param.len++] = 0x46; // UUID 0x4677 (MSB)
+	param.data[param.len++] = 'I';  // Improv header
+	param.data[param.len++] = 'M';
+	param.data[param.len++] = improv_state;
+	param.data[param.len++] = improv_caps;
+	param.data[param.len++] = 0x00; // Reserved
+	param.data[param.len++] = 0x00;
 
-    send_cmd(BT_HCI_CMD_LE_SET_ADV_DATA, &param, sizeof(param));
+	send_cmd(BT_HCI_CMD_LE_SET_ADV_DATA, &param, sizeof(param));
 }
 
 void hci_dev_init(void)
 {
-	/* Open HCI socket	*/
+	/* Open HCI socket */
 	if ((ctl = socket(AF_BLUETOOTH, SOCK_RAW, BTPROTO_HCI)) < 0) {
 		perror("Can't open HCI socket.");
 		exit(1);
@@ -1112,7 +1310,7 @@ void hci_dev_init(void)
 
 	hdi.dev_id = 0;
 
-	if (ioctl(ctl, HCIGETDEVINFO, (void *) &hdi)) {
+	if (ioctl(ctl, HCIGETDEVINFO, (void *)&hdi)) {
 		perror("Can't get device info");
 		exit(1);
 	}
@@ -1121,98 +1319,95 @@ void hci_dev_init(void)
 // Advertising control functions
 static void start_advertising(void)
 {
-    if (!advertising) {
-        set_adv_enable(0);
-        set_adv_data();
-        set_adv_parameters();
-        set_adv_response();
-        set_adv_enable(1);
+	if (!advertising) {
+		adv_name_active = false;
+		last_name_adv_time_ms = 0;
+		set_adv_enable(0);
+		set_adv_data();
+		set_adv_parameters();
+		set_adv_response();
+		set_adv_enable(1);
 
-        advertising = true;
-        printf("[ADV] Advertising restarted successfully\n");
-    } else {
-        printf("[ADV] Advertising already running\n");
-    }
+		advertising = true;
+	}
+}
+
+static void update_advertising_data(void)
+{
+	if (!advertising)
+		return;
+	set_adv_data();
 }
 
 static void stop_advertising(void)
 {
-    if (advertising) {
-        system("hcitool -i hci0 cmd 0x08 0x000A 01");
+	if (advertising) {
+		if (adv_rotate_timeout_id > 0) {
+			mainloop_remove_timeout(adv_rotate_timeout_id);
+			adv_rotate_timeout_id = 0;
+		}
+		system("hcitool -i hci0 cmd 0x08 0x000A 01");
+		set_adv_enable(0);
 
-        printf("[ADV] Stopping advertising...\n");
-        set_adv_enable(0);
+		struct bt_hci_cmd_le_set_adv_data adv_clear;
+		memset(&adv_clear, 0, sizeof(adv_clear));
+		adv_clear.len = 0;
+		send_cmd(BT_HCI_CMD_LE_SET_ADV_DATA, &adv_clear, sizeof(adv_clear));
 
-        // Clear advertising data
-        struct bt_hci_cmd_le_set_adv_data adv_clear;
-        memset(&adv_clear, 0, sizeof(adv_clear));
-        adv_clear.len = 0;
-        send_cmd(BT_HCI_CMD_LE_SET_ADV_DATA, &adv_clear, sizeof(adv_clear));
+		struct bt_hci_cmd_le_set_scan_rsp_data scan_clear;
+		memset(&scan_clear, 0, sizeof(scan_clear));
+		scan_clear.len = 0;
+		send_cmd(BT_HCI_CMD_LE_SET_SCAN_RSP_DATA, &scan_clear, sizeof(scan_clear));
 
-        // Clear scan response data
-        struct bt_hci_cmd_le_set_scan_rsp_data scan_clear;
-        memset(&scan_clear, 0, sizeof(scan_clear));
-        scan_clear.len = 0;
-        send_cmd(BT_HCI_CMD_LE_SET_SCAN_RSP_DATA, &scan_clear, sizeof(scan_clear));
-
-        advertising = false;
-        printf("[ADV] Advertising stopped and data cleared\n");
-    } else {
-        printf("[ADV] Advertising already stopped\n");
-    }
+		advertising = false;
+	}
 }
 
 static void no_client_timeout_cb(int timeout_id, void *user_data)
 {
-    printf("[TIMEOUT] No client connected for %d seconds, exiting...\n", 
-        NO_CLIENT_TIMEOUT_SECONDS);
-
-    should_exit = true;
-    mainloop_quit();
+	(void)timeout_id;
+	(void)user_data;
+	should_exit = true;
+	mainloop_quit();
 }
 
 static void reset_no_client_timeout(void)
 {
-    if (no_client_timeout_id > 0) {
-        mainloop_remove_timeout(no_client_timeout_id);
-        no_client_timeout_id = 0;
-    }
+	if (no_client_timeout_id > 0) {
+		mainloop_remove_timeout(no_client_timeout_id);
+		no_client_timeout_id = 0;
+	}
 
-    if (!client_connected) {
-        no_client_timeout_id = mainloop_add_timeout(NO_CLIENT_TIMEOUT_SECONDS * 1000,
-                                                   no_client_timeout_cb, NULL, NULL);
-        printf("[TIMEOUT] Started %d second timeout for no client connection\n", 
-               NO_CLIENT_TIMEOUT_SECONDS);
-    }
+	if (!client_connected) {
+		no_client_timeout_id = mainloop_add_timeout(NO_CLIENT_TIMEOUT_SECONDS * 1000, no_client_timeout_cb, NULL, NULL);
+	}
 }
 
 static void cleanup_on_exit(void)
 {
-    if (advertising) {
-        printf("[CLEANUP] Cleaning up advertising on exit\n");
+	if (advertising) {
+		struct bt_hci_cmd_le_set_adv_enable param;
+		param.enable = 0;
 
-        struct bt_hci_cmd_le_set_adv_enable param;
-        param.enable = 0;
-
-        int hdev = hci_get_route(NULL);
-        if (hdev >= 0) {
-            int dd = hci_open_dev(hdev);
-            if (dd >= 0) {
-                struct hci_request rq;
-                uint8_t status;
-                memset(&rq, 0, sizeof(rq));
-                rq.ogf = OGF_LE_CTL;
-                rq.ocf = BT_HCI_CMD_LE_SET_ADV_ENABLE;
-                rq.cparam = &param;
-                rq.clen = sizeof(param);
-                rq.rparam = &status;
-                rq.rlen = 1;
-                hci_send_req(dd, &rq, 1000);
-                hci_close_dev(dd);
-            }
-        }
-        advertising = false;
-    }
+		int hdev = hci_get_route(NULL);
+		if (hdev >= 0) {
+			int dd = hci_open_dev(hdev);
+			if (dd >= 0) {
+				struct hci_request rq;
+				uint8_t status;
+				memset(&rq, 0, sizeof(rq));
+				rq.ogf = OGF_LE_CTL;
+				rq.ocf = BT_HCI_CMD_LE_SET_ADV_ENABLE;
+				rq.cparam = &param;
+				rq.clen = sizeof(param);
+				rq.rparam = &status;
+				rq.rlen = 1;
+				hci_send_req(dd, &rq, 1000);
+				hci_close_dev(dd);
+			}
+		}
+		advertising = false;
+	}
 }
 
 int main(void)
@@ -1268,12 +1463,9 @@ int main(void)
 		fd = l2cap_le_att_listen_and_accept(&src_addr, sec, src_type);
 		if (fd < 0) {
 			fprintf(stderr, "Failed to accept L2CAP ATT connection\n");
-
 			usleep(500000);
 			return EXIT_FAILURE;
 		}
-
-		printf("[MAIN] Client connected! Creating GATT server...\n");
 
 		stop_advertising();
 		client_connected = true;
@@ -1290,9 +1482,8 @@ int main(void)
 		reset_no_client_timeout();
 
 		mainloop_run_with_signal(signal_cb, NULL);
-		
+
 		if (should_exit) {
-			printf("[MAIN] Exiting due to termination signal\n");
 			break;
 		}
 
@@ -1306,8 +1497,6 @@ int main(void)
 
 		sleep(1);
 	}
-
-	printf("\n\n[MAIN] Shutting down...\n");
 
 	if (no_client_timeout_id > 0) {
 		mainloop_remove_timeout(no_client_timeout_id);
