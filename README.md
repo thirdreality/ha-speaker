@@ -5,11 +5,12 @@
 
 ThirdReality Voice&Music Assistant is an open-source speaker that supports connecting to the Home Assistant Voice Assistant and Music Assistant. You need to have a device running Home Assistant in order to use this speaker. If you do not have Home Assistant installed yet, refer to the [installation documentation](https://www.home-assistant.io/installation/) for instructions.
 
-- [How to build](#how-to-build)
-- [How to flash](#how-to-flash)
-- [How to connect wifi](#how-to-connect-wifi)
-- [Voice assistant](#voice-assistant)
-- [Music assistant](#music-assistant)
+- [Voice\&Music Assistant](#voicemusic-assistant)
+  - [How to build](#how-to-build)
+  - [How to flash](#how-to-flash)
+  - [How to connect wifi](#how-to-connect-wifi)
+  - [Voice Assistant](#voice-assistant)
+  - [Music Assistant](#music-assistant)
 
 ## How to build
 
@@ -66,14 +67,14 @@ The generated image is located at:
 </div>
 
 ## How to connect wifi
-Download the 3R-Installer app from the app store, then select Add V&M Assistant Dev Edition to set up the network. The speaker will advertise a Bluetooth device named 3RSPK-XXXXX, where XXXXX is the speaker’s MAC address. (Please make sure it’s on the same network as Home Assistant and only 2.4 GHz Wi-Fi is supported)
-<p>
-  <img src="doc/images/app-1.jpg" width="10%">
-  <img src="doc/images/app-2.jpg" width="10%">
-  <img src="doc/images/app-3.jpg" width="10%">
-  <img src="doc/images/app-4.jpg" width="10%">
-  <img src="doc/images/app-5.jpg" width="10%">
-</p>
+1. You need to install the iOS or Android version of the [Home Assistant app](https://companion.home-assistant.io/) first.
+2. Make sure the speaker is in a yellow blinking state.Otherwise, please try factory reset. (Press and hold the Home button for 15 seconds, then release it after you hear the prompt sound.)
+3. Open the Home Assistant app on your phone.Go to Settings -> Devices & services and under Discovered, you should see the device as "3RSPK-XXXXX Improv via BLE".
+4. Enter your Wi-Fi SSID and password. Only 2.4 GHz networks are supported.
+5. A few seconds after the Wi-Fi connection is successful, the speaker will play “Your device is ready to connect to Home Assistant.” At that point, you can proceed to the next step.
+<div align="left">
+  <img src="doc/images/app.png" alt="app" width="15%">
+</div>
 
 ## Voice Assistant
 1. There are two ways to use the voice assistant (If your device doesn’t have sufficient performance, please choose Home Assistant Cloud.):
@@ -87,12 +88,10 @@ Download the 3R-Installer app from the app store, then select Add V&M Assistant 
   <img src="doc/images/cloud.png" alt="cloud" width="400">
 </div>
 
-3. Add the ESPHome integration in Home Assistant.Set the Host to the speaker’s IP address (which can be found in the 3R-Installer app), and set the port to 6053
-
-   Settings -> Devices & services -> Add integration -> ESPHome
+3. Go to Settings -> Devices & services and under Discovered, you should see the device as "3RSPK-XXXXXXXXXXXX ESPHome", click Add.
 
 <p>
-  <img src="doc/images/add-esphome.png" width="20%" height="250">
+  <img src="doc/images/esphome.png" width="25%" height="250">
   <img src="doc/images/esphome-setup1.png" width="20%" height="250">
   <img src="doc/images/esphome-setup2.png" width="20%" height="250">
   <img src="doc/images/esphome-setup3.png" width="20%" height="250">
