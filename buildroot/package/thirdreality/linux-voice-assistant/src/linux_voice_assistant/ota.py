@@ -12,6 +12,8 @@ import os
 import signal
 import time
 import ctypes
+import hashlib
+import re
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +37,53 @@ def _write_status_global(ota_status: str, progress: float = 0.0, message: str = 
             json.dump({"ota_status": ota_status, "progress": float(progress), "message": message}, sf, ensure_ascii=False)
     except Exception as e:
         _LOGGER.debug("Write ota status failed: %s", e)
+
+
+def _get_expected_sha256() -> str | None:
+    try:
+        with open(OTA_METADATA, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return None
+
+    for key in ("sha256", "sha256sum", "checksum", "hash"):
+        val = meta.get(key)
+        if isinstance(val, str):
+            v = val.strip().lower()
+            if re.fullmatch(r"[a-f0-9]{64}", v):
+                return v
+
+    text = str(meta.get("release_summary") or "")
+    url = str(meta.get("url") or "")
+    filename = url.rsplit("/", 1)[-1] if url else ""
+    if text:
+        if filename:
+            for line in text.splitlines():
+                if filename in line:
+                    m = re.search(r"([a-fA-F0-9]{64})", line)
+                    if m:
+                        return m.group(1).lower()
+        m = re.search(r"([a-fA-F0-9]{64})", text)
+        if m:
+            return m.group(1).lower()
+    return None
+
+
+def _verify_sha256(path: Path, expected: str) -> bool:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        actual = h.hexdigest().lower()
+        _LOGGER.info("SHA256 computed: %s", actual)
+        if actual == expected:
+            return True
+        _LOGGER.error("SHA256 mismatch: expected=%s actual=%s", expected, actual)
+        return False
+    except Exception as e:
+        _LOGGER.error("SHA256 verification failed: %s", e)
+        return False
 
 
 def download_file(url: str, dest_path: Path, chunk_size: int = 8192) -> bool:
@@ -312,7 +361,7 @@ def download_file(url: str, dest_path: Path, chunk_size: int = 8192) -> bool:
         _LOGGER.info("Curl download finished: %d bytes", final_size)
         _write_status("download", 100.0, "Download completed")
 
-        # No post-download sha256 verification by design (removed per user request)
+        # Post-download verification is handled in check_swu via sha256
 
         # Move into place
         try:
@@ -425,43 +474,27 @@ def install_swu(path: Path) -> bool:
 
 
 def check_swu(path: Path) -> bool:
-    """Run swupdate check mode only against /data/software.swu (DEFAULT_DEST).
-    Tries several swupdate binary locations but always uses DEFAULT_DEST as the -i file.
-    Returns True if check succeeded (rc==0). If rc==1 treat as invalid firmware and return False."""
+    """Verify SWU integrity using sha256 from OTA metadata.
+    Returns True if sha256 matches, otherwise False."""
     target = DEFAULT_DEST
-    cmds = [
-        ["/usr/bin/swupdate", "-c", "-i", str(target), "-k", "/etc/swupdate-public.pem", "-H", "S420:1.0"],
-    ]
 
-    # Verification started (internal): do not write a global status here.
-    _LOGGER.debug("Verifying firmware %s (check mode)", str(target))
+    _LOGGER.debug("Verifying firmware %s (sha256)", str(target))
+    expected = _get_expected_sha256()
+    if not expected:
+        _LOGGER.error("Missing sha256 in OTA metadata; cannot verify firmware")
+        _write_status_global("failed", 0.0, "sha256 missing in OTA metadata")
+        return False
 
-    # Execute the single configured check command (no shell fallback)
-    cmd = cmds[0]
+    if not target.exists():
+        _LOGGER.error("Firmware file not found for sha256 check: %s", target)
+        _write_status_global("failed", 0.0, "firmware file missing for sha256 check")
+        return False
 
-    try:
-        _LOGGER.info("Trying swupdate check command: %s", cmd)
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        _LOGGER.debug("swupdate check stdout: %s", proc.stdout[:1000])
-        _LOGGER.debug("swupdate check stderr: %s", proc.stderr[:1000])
-        if proc.returncode == 0:
-            _LOGGER.info("swupdate check succeeded: %s", cmd)
-            return True
-        if proc.returncode == 1:
-            _LOGGER.error("swupdate check failed (rc=1): invalid or incomplete firmware")
-            # Report failure using allowed global status
-            _write_status_global("failed", 0.0, "swupdate check failed: invalid or incomplete firmware (rc=1)")
-            return False
-        _LOGGER.warning("swupdate check returned %s for %s", proc.returncode, cmd)
-    except FileNotFoundError:
-        _LOGGER.debug("swupdate check command not found: %s", cmd)
-    except subprocess.TimeoutExpired:
-        _LOGGER.error("swupdate check command timed out: %s", cmd)
-    except Exception as e:
-        _LOGGER.error("swupdate check command failed (%s): %s", cmd, e)
+    if _verify_sha256(target, expected):
+        _LOGGER.info("sha256 verification succeeded")
+        return True
 
-    _LOGGER.error("No swupdate check command succeeded")
-    _write_status_global("failed", 0.0, "No swupdate check command succeeded")
+    _write_status_global("failed", 0.0, "sha256 verification failed")
     return False
 
 
@@ -484,7 +517,7 @@ def run_from_metadata(metadata_path: Path = OTA_METADATA) -> int:
     if not ok:
         return 4
 
-    # Run swupdate check before actual install. If check fails (rc==1) treat as failed and abort.
+    # Run sha256 check before actual install.
     try:
         if not check_swu(dest):
             return 6
@@ -500,7 +533,7 @@ def run_from_metadata(metadata_path: Path = OTA_METADATA) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="OTA downloader/installer helper")
     parser.add_argument("--url", help="firmware URL")
-    # note: --sha256 deprecated/ignored; sha256 verification removed per config
+    # note: sha256 verification is performed in check_swu based on ota_update.json
     parser.add_argument("--dest", help="destination path", default=str(DEFAULT_DEST))
     parser.add_argument("--from-metadata", action="store_true", help="read /data/conf/ota_update.json and run")
     parser.add_argument("--debug", action="store_true")

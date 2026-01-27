@@ -664,9 +664,9 @@ class UpdateEntity(ESPHomeEntity):
             return {}
 
     def _refresh_state(self) -> None:
-        metadata = self._load_ota_metadata()
+        metadata = self._check_new_firmware() or {}
         if not metadata:
-            metadata = self._check_new_firmware() or {}
+            metadata = self._load_ota_metadata()
         ota_status = self._fetch_ota_status()
 
         current_version = self._load_current_version()
@@ -895,12 +895,30 @@ class UpdateEntity(ESPHomeEntity):
 
             # Only .swu is accepted; if none found, url remains empty.
 
+            sha256 = None
+
+            def _parse_sha256_from_digest(digest: str) -> str | None:
+                """Parse sha256 from GitHub asset digest field (format: 'sha256:...')"""
+                if not digest:
+                    return None
+                if digest.startswith("sha256:"):
+                    return digest[7:].lower()
+                m = re.search(r"([a-fA-F0-9]{64})", digest)
+                if m:
+                    return m.group(1).lower()
+                return None
+
+            # Only use the digest field from the chosen asset
+            if chosen and chosen.get("digest"):
+                sha256 = _parse_sha256_from_digest(str(chosen.get("digest") or ""))
+
             metadata = {
                 "url": url,
                 "version": latest_tag or current_version,
                 "title": gh.get("name") or latest_tag or "",
                 "release_url": gh.get("html_url") or "",
                 "release_summary": gh.get("body") or "",
+                "sha256": sha256 or "",
             }
 
             try:
