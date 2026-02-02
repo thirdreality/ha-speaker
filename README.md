@@ -5,6 +5,8 @@
 
 ThirdReality Voice&Music Assistant is an open-source speaker that supports connecting to the Home Assistant Voice Assistant and Music Assistant. You need to have a device running Home Assistant in order to use this speaker. If you do not have Home Assistant installed yet, refer to the [installation documentation](https://www.home-assistant.io/installation/) for instructions.
 
+[Buy it on ThirdReality Shop](https://thirdreality.com/product/voice-music-assistant-dev-edition/)
+
 - [Voice\&Music Assistant](#voicemusic-assistant)
   - [How to build](#how-to-build)
   - [How to flash](#how-to-flash)
@@ -52,7 +54,7 @@ The generated image is located at:
 
 3. Next, navigate to the v2 folder and run Aml_Burn_Tool.exe.
 
-4. Load the compiled **.img firmware file
+4. Load the compiled **.img firmware file. Or you can download the latest firmware [here](https://github.com/thirdreality/voice-music-assistant/releases).
 
 5. Click on Start to initiate the burn process.
 
