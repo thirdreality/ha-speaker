@@ -1,0 +1,7 @@
+config BR2_PACKAGE_PYTHON_NETIFACES_2
+	bool "python-netifaces-2"
+	depends on BR2_PACKAGE_PYTHON3
+	help
+	  netifaces allows you to interact with network interfaces in Python.
+	  
+	  https://github.com/SamuelYvon/netifaces-2/

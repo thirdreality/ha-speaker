@@ -4,3 +4,5 @@
 /*.diff
 /*.patch
 /TODO.txt
+/*.vscode
+/*.github

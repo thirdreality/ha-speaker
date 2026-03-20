@@ -14,7 +14,8 @@ start_voice_assistant_process() {
     fi
     
     SPK_NAME=$(jq -r '.device.name // "thirdreality-speaker"' "$DEVICE_CONF")
-    python3 -m linux_voice_assistant --name "$SPK_NAME" --wake-model "okay_nabu" --debug &
+    # python3 -m linux_voice_assistant --name "$SPK_NAME" --wake-model "okay_nabu" --preferences-file "/data/conf/sound.json" --network-interface wlan0 --debug &
+    python3 -m linux_voice_assistant --name "$SPK_NAME" --wake-model "okay_nabu" --preferences-file "/data/conf/sound.json" --network-interface wlan0 &
     echo $! > $VOICE_ASSISTANT_PIDFILE
 }
 

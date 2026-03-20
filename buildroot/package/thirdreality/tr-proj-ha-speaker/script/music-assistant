@@ -4,7 +4,9 @@
 
 NAME=snapclient
 DAEMON=/usr/bin/$NAME
-PIDFILE=/var/run/$NAME/pid
+PIDDIR=/var/run/thirdreality
+MONITOR_PIDFILE=$PIDDIR/music-assistant.pid
+RESTART_DELAY=5
 
 [ -r /etc/default/$NAME ] && . /etc/default/$NAME
 SNAPCLIENT_OPTS="-d $SNAPCLIENT_OPTS"
@@ -13,28 +15,68 @@ if [ "$START_SNAPCLIENT" != "true" ] ; then
   exit 0
 fi
 
-start() {
+is_pid_running() {
+	pidfile="$1"
+	[ -f "$pidfile" ] || return 1
+
+	pid="$(cat "$pidfile" 2>/dev/null)"
+	[ -n "$pid" ] || return 1
+
+	kill -0 "$pid" 2>/dev/null
+}
+
+is_snapclient_running() {
+	pidof "$NAME" >/dev/null 2>&1
+}
+
+start_snapclient() {
+	if is_snapclient_running; then
+		return 0
+	fi
+
 	echo -n "Starting $NAME: "
-	start-stop-daemon --start --quiet --pidfile "$PIDFILE" --exec "$DAEMON" -- $SNAPCLIENT_OPTS
+	start-stop-daemon --start --quiet --name "$NAME" --exec "$DAEMON" -- $SNAPCLIENT_OPTS
 	[ $? = 0 ] && echo "OK" || echo "FAIL"
 }
 
-stop() {
+stop_snapclient() {
 	echo -n "Stopping $NAME: "
-	start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile $PIDFILE --name $NAME
+	start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --name $NAME
 	RETVAL="$?"
 	[ "$RETVAL" = 2 ] && return 2
-	# Wait for children to finish too if this is a daemon that forks
-	# and if the daemon is only ever run from this initscript.
-	# If the above conditions are not satisfied then add some other code
-	# that waits for the process to drop all resources that could be
-	# needed by services started subsequently.  A last resort is to
-	# sleep for some time.
 	start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --exec $DAEMON
 	[ "$?" = 2 ] && return 2
-	# Many daemons don't delete their pidfiles when they exit.
-	rm -f $PIDFILE
 	return "$RETVAL"
+}
+
+monitor_snapclient() {
+	while true; do
+		if ! is_snapclient_running; then
+			start_snapclient
+		fi
+		sleep "$RESTART_DELAY"
+	done
+}
+
+start() {
+	mkdir -p "$PIDDIR"
+
+	if is_pid_running "$MONITOR_PIDFILE"; then
+		return 0
+	fi
+
+	rm -f "$MONITOR_PIDFILE"
+	monitor_snapclient &
+	echo $! > "$MONITOR_PIDFILE"
+}
+
+stop() {
+	if is_pid_running "$MONITOR_PIDFILE"; then
+		kill "$(cat "$MONITOR_PIDFILE")" 2>/dev/null
+	fi
+	rm -f "$MONITOR_PIDFILE"
+
+	stop_snapclient
 }
 
 restart() {

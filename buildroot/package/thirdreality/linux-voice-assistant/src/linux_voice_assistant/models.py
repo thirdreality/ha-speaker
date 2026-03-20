@@ -12,10 +12,14 @@ if TYPE_CHECKING:
     from pymicro_wakeword import MicroWakeWord
     from pyopen_wakeword import OpenWakeWord
 
-    from .entity import ESPHomeEntity, MediaPlayerEntity
+    from .entity import (
+        ESPHomeEntity,
+        MediaPlayerEntity,
+        MuteSwitchEntity,
+        ThinkingSoundEntity,
+    )
     from .mpv_player import MpvMediaPlayer
     from .satellite import VoiceSatelliteProtocol
-    from .entity import ESPHomeEntity, MediaPlayerEntity, MicrophoneMuteEntity, EventEntity, UpdateEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,24 +53,23 @@ class AvailableWakeWord:
 
         raise ValueError(f"Unexpected wake word type: {self.type}")
 
-@dataclass
-class PlaybackState:
-    url: Optional[str] = None
-    playlist: List[str] = field(default_factory=list)
-    is_playing: bool = False
-    volume: int = 50
-    timestamp: float = 0.0
 
 @dataclass
 class Preferences:
     active_wake_words: List[str] = field(default_factory=list)
-    last_playback: Optional[PlaybackState] = None
+    volume: Optional[float] = None
+    thinking_sound: int = 0  # 0 = disabled, 1 = enabled
 
 
 @dataclass
 class ServerState:
     name: str
+    friendly_name: str
     mac_address: str
+    ip_address: str
+    network_interface: str
+    version: str
+    esphome_version: str
     audio_queue: "Queue[Optional[bytes]]"
     entities: "List[ESPHomeEntity]"
     available_wake_words: "Dict[str, AvailableWakeWord]"
@@ -76,20 +79,24 @@ class ServerState:
     music_player: "MpvMediaPlayer"
     tts_player: "MpvMediaPlayer"
     wakeup_sound: str
+    processing_sound: str
     timer_finished_sound: str
+    mute_sound: str
+    unmute_sound: str
     preferences: Preferences
     preferences_path: Path
     download_dir: Path
 
     media_player_entity: "Optional[MediaPlayerEntity]" = None
-    microphone_mute_entity: "Optional[MicrophoneMuteEntity]" = None
-    home_button_entity: "Optional[EventEntity]" = None
-    update_entity: "Optional[UpdateEntity]" = None
     satellite: "Optional[VoiceSatelliteProtocol]" = None
+    mute_switch_entity: "Optional[MuteSwitchEntity]" = None
+    thinking_sound_entity: "Optional[ThinkingSoundEntity]" = None
     wake_words_changed: bool = False
     refractory_seconds: float = 2.0
-    loop: "Optional[object]" = None
-    mic_muted: bool = False
+    thinking_sound_enabled: bool = False
+    muted: bool = False
+    connected: bool = False
+    volume: float = 1.0
 
     def save_preferences(self) -> None:
         """Save preferences as JSON."""
@@ -97,5 +104,28 @@ class ServerState:
         self.preferences_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.preferences_path, "w", encoding="utf-8") as preferences_file:
             json.dump(
-                asdict(self.preferences), preferences_file, ensure_ascii=False, indent=4
+                asdict(self.preferences),
+                preferences_file,
+                ensure_ascii=False,
+                indent=4,
             )
+
+    def persist_volume(self, volume: float) -> None:
+        """Persist the normalized media volume (0.0 - 1.0)."""
+        clamped_volume = max(0.0, min(1.0, volume))
+        _LOGGER.debug(
+            "persist_volume called: new=%s, current=%s, prefs=%s",
+            clamped_volume,
+            self.volume,
+            self.preferences.volume,
+        )
+
+        if abs(self.volume - clamped_volume) < 0.0001 and self.preferences.volume is not None and abs(self.preferences.volume - clamped_volume) < 0.0001:
+            _LOGGER.debug("Skipping save - volume unchanged")
+            return
+
+        self.volume = clamped_volume
+        self.preferences.volume = clamped_volume
+        _LOGGER.info("Saving volume %s to %s", clamped_volume, self.preferences_path)
+        self.save_preferences()
+        _LOGGER.info("Volume saved successfully")

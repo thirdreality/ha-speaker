@@ -4,11 +4,12 @@
 #
 ################################################################################
 
-LINUX_VOICE_ASSISTANT_VERSION = fd4c1d97
+LINUX_VOICE_ASSISTANT_VERSION = fbc4e05f
 LINUX_VOICE_ASSISTANT_SITE = $(TOPDIR)/package/thirdreality/linux-voice-assistant/src
 LINUX_VOICE_ASSISTANT_SITE_METHOD = local
 
 LINUX_VOICE_ASSISTANT_SETUP_TYPE = setuptools
+LINUX_VOICE_ASSISTANT_DEPENDENCIES = python-netifaces-2
 
 define LINUX_VOICE_ASSISTANT_INSTALL_FILES
 	cp -rf $(@D)/wakewords $(TARGET_DIR)/usr/lib/python3.11/site-packages/

@@ -1,0 +1,7 @@
+config BR2_PACKAGE_PYTHON_GETMAC
+	bool "python-getmac"
+	depends on BR2_PACKAGE_PYTHON3
+	help
+	  getmac allows you to retrieve the MAC address of network interfaces in Python.
+	  
+	  https://github.com/GhostofGoes/getmac

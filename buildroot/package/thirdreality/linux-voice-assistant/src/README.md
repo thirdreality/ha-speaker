@@ -1,101 +1,154 @@
-# Linux Voice Assistant
+# Linux-Voice-Assistant
 
-Experimental Linux voice assistant for [Home Assistant][homeassistant] that uses the [ESPHome][esphome] protocol.
+[![CI](https://github.com/OHF-Voice/linux-voice-assistant/actions/workflows/docker-build-release.yml/badge.svg)](https://github.com/OHF-Voice/linux-voice-assistant/actions/workflows/docker-build-release.yml) [![GitHub Package Version](https://img.shields.io/github/v/tag/OHF-Voice/linux-voice-assistant?label=version)](https://github.com/OHF-Voice/linux-voice-assistant/pkgs/container/linux-voice-assistant) [![GitHub License](https://img.shields.io/github/license/OHF-Voice/linux-voice-assistant)](https://github.com/OHF-Voice/linux-voice-assistant/blob/main/LICENSE.md) [![GitHub last commit](https://img.shields.io/github/last-commit/OHF-Voice/linux-voice-assistant)](https://github.com/OHF-Voice/linux-voice-assistant/commits) [![GitHub Container Registry](https://img.shields.io/badge/Container%20Registry-GHCR-blue)](https://github.com/OHF-Voice/linux-voice-assistant/pkgs/container/linux-voice-assistant)
 
-Runs on Linux `aarch64` and `x86_64` platforms. Tested with Python 3.13 and Python 3.11.
-Supports announcments, start/continue conversation, and timers.
+An experimental Linux-Voice-Assistant software for [Home Assistant](https://www.home-assistant.io/) remote voice control and interaction.
 
-## Installation
+This project enables you to build a Linux-based voice assistant designed to use [Assist](https://www.home-assistant.io/voice_control/) for Home Assistant. It allows you to create your own smart speaker that runs on any x64 or ARM64 hardware capable of handling local audio processing (using PulseAudio).
 
-Install system dependencies (`apt-get`):
+Unlike simpler voice satellites that run on microcontrollers with very limited compute power, this setup can perform local wake word detection (OWW/MWW) and process some data on-device. 
 
-* `libportaudio2` or `portaudio19-dev` (for `sounddevice`)
-* `build-essential` (for `pymicro-features`)
-* `libmpv-dev` (for `python-mpv`)
+Because it runs on a full Linux system and offers access significantly more local computing resources for additional features and other integrations on the same satellite, this approach also provides greater flexibility for customization (such as for example experiment with using PipeWire).
 
-Clone and install project:
+[![A project from the Open Home Foundation](https://www.openhomefoundation.org/badges/ohf-project.png)](https://www.openhomefoundation.org/)
 
-``` sh
-git clone https://github.com/OHF-Voice/linux-voice-assistant.git
-cd linux-voice-assistant
-script/setup
-```
+## Features:
 
-## Running
+- Works with [Home Assistant](https://www.home-assistant.io/integrations/esphome/) using the [ESPHome](https://esphome.io/) protocol/API (via [aioesphomeapi](https://github.com/esphome/aioesphomeapi))
+- Feature local on-device wake word detection using integrated [OpenWakeWord](https://github.com/dscripka/openWakeWord) or [MicroWakeWord](https://github.com/kahrendt/microWakeWord)
+- Supports multiple wake words and languages
+- Supports multiple architectures (linux/amd64 and linux/aarch64)
+- Automated builds with artifact attestation for security
+- Supports announcments, start/continue conversation, and timers
+- Tested with Python 3.13 and Python 3.11.
+- Prebuild docker image available on [GitHub Container Registry](https://github.com/OHF-Voice/linux-voice-assistant/pkgs/container/linux-voice-assistant)
+- Prebuild Raspberry Pi image
 
-Use `script/run` or `python3 -m linux_voice_assistant`
 
-You must specify `--name <NAME>` with a name that will be available in Home Assistant.
+## Usage:
 
-See `--help` for more options.
+### Hardware:
 
-### Microphone
+A more extensive list for possible compatible hardware can be found in the [PiCompose documentation](https://github.com/florian-asche/PiCompose) but basically any microphone that works with [PipeWire (multimedia framework for Linux)](https://pipewire.org/) can in theory be used for voice input with the prebuild image from there, you should however preferably use a far-field microphone-array solution if want better result. 
 
-Use `--audio-input-device` to change the microphone device. Use `--list-input-devices` to see the available microphones. 
+Two solutions recommended for test setups today is to use a Raspberry Pi Zero 2 W SBC (Single Board Computer with built-in WiFi) in combination with the [Satellite1 Hat Board](https://futureproofhomes.net/products/satellite1-top-microphone-board) or the [Respeaker Lite](https://wiki.seeedstudio.com/reSpeaker_usb_v3/). Those have microphone-array designed for far-field voice capture with the added benefit of using an onboard XMOS DSP microcontroller with custom firmware which does advanced audio pre-processing for microphone cleanup that result in very good voice recognition capabilities (as it runs algorithms for Noise Suppression, Acoustic Echo Cancellation, Interference Cancellation, and Automatic Gain Control). 
 
-The microphone device **must** support 16Khz mono audio.
+Alternativly if on a lower budget then suggest could try other untested microphone-array boards like example the [reSpeaker 2-Mics Pi HAT V2.0](https://wiki.seeedstudio.com/ReSpeaker_2_Mics_Pi_HAT/) (which uses a much more basic audio codec chip).
 
-### Speaker
+As for the minimum required compute performance on these satellites the target reference hardware for testing is currently a 64-bit ARM-based SBC based on Raspberry Pi RP3A0 SiP (System-in-Package); which means the Raspberry Pi Zero 2 W, Raspberry Pi Compute Module 3E (Raspberry Pi CM3E), or other development boards that uses the Compute Module Zero" (Raspberry Pi CM0), as all of which have similar specifications to the Raspberry Pi 3 B/B+ but with a CPU running at a lower frequency.
 
-Use `--audio-output-device` to change the speaker device. Use `--list-output-devices` to see the available speakers.
+But you can also install LVA on AMD64 devices, for example on your Linux desktop computer.
 
-## Wake Word
+### Software:
 
-Change the default wake word with `--wake-model <id>` where `<id>` is the name of a model in the `wakewords` directory. For example, `--wake-model hey_jarvis` will load `wakewords/hey_jarvis.tflite` by default.
+#### Installation:
 
-You can include more wakeword directories by adding `--wake-word-dir <DIR>` where `<DIR>` contains either [microWakeWord][] or [openWakeWord][] config files and `.tflite` models. For example, `--wake-word-dir wakewords/openWakeWord` will include the default wake words for openWakeWord.
+For Raspberry Pi users, we provide a prebuild image that can be flashed to a SD card. See [PiCompose](https://github.com/florian-asche/PiCompose).
 
-If you want to add [other wakeword][wakewords-collection], make sure to create a small JSON config file to identify it as an openWakeWord model. For example, download the [GLaDOS][glados] model to `glados.tflite` and create `glados.json` with:
+For all other users we have different installation methods available (Docker, systemd), each with its own dedicated instructions. See [Linux-Voice-Assistant - Installation](docs/install.md). 
 
-``` json
-{
-  "type": "openWakeWord",
-  "wake_word": "GLaDOS",
-  "model": "glados.tflite"
-}
-```
+#### Parameter overview:
 
-Add `--wake-word-dir <DIR>` with the directory containing `glados.tflite` and `glados.json` to your command-line.
-
-## Connecting to Home Assistant
-
-1. In Home Assistant, go to "Settings" -> "Device & services"
-2. Click the "Add integration" button
-3. Choose "ESPHome" and then "Set up another instance of ESPHome"
-4. Enter the IP address of your voice satellite with port 6053
-5. Click "Submit"
-
-## Acoustic Echo Cancellation
-
-Enable the echo cancel PulseAudio module:
+💡 **Note:** There is a [environment variable](docs/install_application.md#environment-variables-reference) for each parameter if you use docker or systemd based setup.
 
 ``` sh
-pactl load-module module-echo-cancel \
-  aec_method=webrtc \
-  aec_args="analog_gain_control=0 digital_gain_control=1 noise_suppression=1"
+usage: __main__.py [-h] [--name NAME] [--audio-input-device AUDIO_INPUT_DEVICE] [--list-input-devices] [--audio-input-block-size AUDIO_INPUT_BLOCK_SIZE] [--audio-output-device AUDIO_OUTPUT_DEVICE] [--list-output-devices] [--wake-word-dir WAKE_WORD_DIR]
+                   [--wake-model WAKE_MODEL] [--stop-model STOP_MODEL] [--download-dir DOWNLOAD_DIR] [--refractory-seconds REFRACTORY_SECONDS] [--wakeup-sound WAKEUP_SOUND] [--timer-finished-sound TIMER_FINISHED_SOUND] [--processing-sound PROCESSING_SOUND]
+                   [--mute-sound MUTE_SOUND] [--unmute-sound UNMUTE_SOUND] [--preferences-file PREFERENCES_FILE] [--host HOST] [--network-interface NETWORK_INTERFACE] [--port PORT] [--enable-thinking-sound] [--debug]
 ```
 
-Verify that the `echo-cancel-source` and `echo-cancel-sink` devices are present:
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `--name` | Name of the voice assistant device (required) | Autogenerated (`lva-MAC-ADDRESS`) |
+| `--audio-input-device` | Soundcard name for input device | Autodetected |
+| `--audio-input-block-size` | Audio input block size in samples | 1024 |
+| `--audio-output-device` | mpv name for output device | Autodetected |
+| `--wake-word-dir` | Directory with wake word models (.tflite) and configs (.json) | `wakewords/` |
+| `--wake-model` | ID of active wake word model | `okay_nabu` |
+| `--stop-model` | ID of stop model | `stop` |
+| `--download-dir` | Directory to download custom wake word models, etc. | `local/` |
+| `--refractory-seconds` | Seconds before wake word can be activated again | 2.0 |
+| `--wakeup-sound` | Sound file played when wake word is detected | `sounds/wake_word_triggered.flac` |
+| `--timer-finished-sound` | Sound file played when timer finishes | `sounds/timer_finished.flac` |
+| `--processing-sound` | Sound played while assistant is processing | `sounds/processing.wav` |
+| `--mute-sound` | Sound played when muting the assistant | `sounds/mute_switch_on.flac` |
+| `--unmute-sound` | Sound played when unmuting the assistant | `sounds/mute_switch_off.flac` |
+| `--preferences-file` | Path to preferences JSON file | `preferences.json` |
+| `--host` | IP-Address for ESPHome server, use 0.0.0.0 for all | Autodetected |
+| `--network-interface` | Network interface for ESPHome server | Autodetected |
+| `--port` | Port for ESPHome server | 6053 |
+| `--enable-thinking-sound` | Enable thinking sound on startup | False |
+| `--debug` | Print DEBUG messages to console | False |
+
+## Build Information:
+
+Image builds can be tracked in this repository's `Actions` tab, and utilize [artifact attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds) to certify provenance.
+
+The Docker images are built using GitHub Actions, which provides:
+
+- Automated builds for different architectures
+- Artifact attestation for build provenance verification
+- Regular updates and maintenance
+
+The documentation for the build process can be found in the [GitHub Actions Workflows](.github/workflow.md) file.
+
+## Development:
+
+### Code Quality Checks:
+
+The project uses the following tools to ensure code quality:
+- **Black**: Code formatting (88 characters per line, PEP 8 compliant)
+- **isort**: Import sorting compatible with Black
+- **flake8**: Style and syntax checks
+- **pylint**: Code quality checks
+- **mypy**: Static type analysis
+
+### Setup:
+
+To use the development tools (linting, testing, etc.), you need to install the required dependencies:
 
 ``` sh
-pactl list short sources
-pactl list short sinks
+./script/setup --dev
+source .venv/bin/activate
 ```
 
-Use the new devices:
+### Linting Commands:
 
+#### Run all linting checks:
 ``` sh
-# The device names may be different on your system.
-# Double check with --list-input-devices and --list-output-devices
-python3 -m linux_voice_assistant ... \
-     --audio-input-device 'Echo-Cancel Source' \
-     --audio-output-device 'pipewire/echo-cancel-sink'
+./script/lint...
 ```
 
-<!-- Links -->
-[homeassistant]: https://www.home-assistant.io/
-[esphome]: https://esphome.io/
-[microWakeWord]: https://github.com/kahrendt/microWakeWord
-[openWakeWord]: https://github.com/dscripka/openWakeWord
-[wakewords-collection]: https://github.com/fwartner/home-assistant-wakewords-collection
-[glados]: https://github.com/fwartner/home-assistant-wakewords-collection/blob/main/en/glados/glados.tflite
+#### Individual linting commands (with auto-fix support):
+
+| Script | Description | Auto-fix Available? |
+|--------|-------------|---------------------|
+| `./script/lint_black` | Checks Python code formatting with Black | Yes, use `--auto` flag |
+| `./script/lint_flake8` | Runs style and syntax checks with flake8 | No |
+| `./script/lint_isort` | Checks import sorting with isort | Yes, use `--auto` flag |
+| `./script/lint_mypy` | Runs static type analysis with mypy | No |
+| `./script/lint_pylint` | Runs code quality checks with pylint | Yes, use `--auto` flag |
+
+#### Examples:
+
+Run a specific lint check:
+``` sh
+./script/lint_black
+```
+
+Auto-fix formatting issues (Black + isort):
+``` sh
+./script/lint_black --auto
+./script/lint_isort --auto
+```
+
+### Testing:
+
+Run the test suite:
+``` sh
+./script/test
+```
+
+## License
+
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.

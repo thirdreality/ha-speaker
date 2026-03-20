@@ -8,14 +8,12 @@ import signal
 import json
 import sys
 import threading
-import hashlib
-import subprocess 
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
+import uuid
+from datetime import datetime
 
 from .utils import util
-from .http_server import SupervisorHTTPServer  
+from .http_server import SupervisorHTTPServer
+from .ota import DEFAULT_DOWNLOAD_PATH, OTARelease, download_firmware, install_firmware
 from .sysinfo import SystemInfoUpdater, SystemInfo
 
 # Configure logging
@@ -92,6 +90,12 @@ class Supervisor:
 
         if not last_ota:
             self.logger.info("No previous OTA found")
+            return
+
+        if last_ota.get('ota_status') == 'download':
+            self.logger.info("Clearing interrupted OTA download state")
+            self.ota_history['last_ota'] = None
+            self._save_ota_history()
             return
 
         current_id = last_ota.get('ota_id')
@@ -174,13 +178,13 @@ class Supervisor:
             'target_version': version,
             'url': url,
             'md5': md5,
-            'ota_status': 'download',
-            'progress': 0,
+            'ota_status': 'install',
+            'progress': 100,
             'start_time': start_time,
-            'message': 'Starting OTA update...'
+            'message': 'Installing firmware...'
         }
         self._save_ota_history()
-        self.logger.info(f"OTA start recorded: ID={ota_id}, version={version}")
+        self.logger.info(f"OTA install recorded: ID={ota_id}, version={version}")
         
     def _record_ota_installing(self, ota_id):
         last_ota = self.ota_history.get('last_ota')
@@ -287,464 +291,94 @@ class Supervisor:
         logging.info("Performing factory reset...")
         util.perform_factory_reset()
 
+    def _mark_ota_failed(self, ota_id, error_msg):
+        finish_time = time.strftime('%Y-%m-%d %H:%M:%S')
+        self._record_ota_failed(ota_id, error_msg)
+        self._update_ota_state(
+            ota_status='failed',
+            progress=100,
+            finish_time=finish_time,
+            message=error_msg
+        )
+        return False
+
+    def _handle_download_progress(self, progress, has_progress):
+        message = 'Downloading firmware...'
+        if has_progress:
+            message = f'Downloading firmware... {progress:.1f}%'
+        self._update_ota_state(
+            ota_status='download',
+            progress=int(progress),
+            message=message
+        )
+
     def perform_ota_update(self, url, version, md5, ota_id=None):
-        import requests
-        import uuid
-        from datetime import datetime
-        
         if ota_id is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             unique_id = str(uuid.uuid4())[:8]
             ota_id = f"ota_{timestamp}_{unique_id}"
-        
+
         try:
-            self._record_ota_start(ota_id, version, url, md5)
-            
             self._update_ota_state(
                 ota_id=ota_id,
                 ota_status='download',
                 progress=0,
                 start_time=time.strftime('%Y-%m-%d %H:%M:%S'),
+                finish_time='',
                 message='Starting OTA update...'
             )
-            
+
+            release = OTARelease(version=version, url=url, expected_md5=md5)
             self.logger.info(f"Starting OTA update to version {version}")
             self.logger.info(f"Download URL: {url}")
-            
-            download_path = "/data/software.swu"
-            
-            if os.path.exists(download_path):
-                self.logger.info(f"Found existing file: {download_path}")
-                self._update_ota_state(message='Checking existing file...')
-                
-                file_size = os.path.getsize(download_path)
-                if file_size > 0:
-                    self.logger.info(f"Existing file size: {file_size} bytes")
-                    
-                    self.logger.info("Verifying MD5 of existing file...")
-                    self._update_ota_state(message='Verifying existing file MD5...')
-                    calculated_md5 = self._calculate_file_md5(download_path, show_progress=True)
-                    
-                    if calculated_md5.lower() == md5.lower():
-                        self.logger.info("✓ MD5 verification passed! Using existing file.")
-                        self._update_ota_state(
-                            ota_status='install',
-                            progress=100,
-                            message='Using existing file, starting installation...'
-                        )
-                        return self._perform_upgrade(download_path, version, ota_id)
-                    else:
-                        self.logger.warning(f"✗ MD5 mismatch! Expected: {md5}, Got: {calculated_md5}")
-                        self.logger.info("Deleting corrupted file and re-downloading...")
-                        self._update_ota_state(message='Existing file corrupted, re-downloading...')
-                        os.remove(download_path)
-                else:
-                    self.logger.warning("Existing file is empty, deleting...")
-                    os.remove(download_path)
-            
-            self.logger.info("Downloading firmware with CURL...")
-            self._update_ota_state(message='Downloading firmware...')
 
-            try:
-                head_result = subprocess.run(
-                    ['curl', '-sI', '-k', url],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                
-                total_size = 0
-                for line in head_result.stdout.split('\n'):
-                    if 'content-length:' in line.lower():
-                        total_size = int(line.split(':')[1].strip())
-                        break
-                
-                total_mb = total_size / 1024 / 1024 if total_size > 0 else 0
-                self.logger.info(f"File size: {total_mb:.2f} MB")
-                
-            except Exception as e:
-                self.logger.warning(f"Failed to get file size: {e}")
-                total_size = 0
+            downloaded_path = download_firmware(
+                release,
+                download_path=DEFAULT_DOWNLOAD_PATH,
+                progress_callback=self._handle_download_progress,
+            )
 
-            curl_cmd = [
-                'curl',
-                '-k',
-                '-L',
-                '--retry', '3',
-                '--connect-timeout', '60',
-                '--max-time', '1800',
-                '-o', download_path,
-                url
-            ]
-
-            self.logger.info(f"Download command: {' '.join(curl_cmd)}")
-
-            try:
-                download_complete = threading.Event()
-                download_error = [None]
-                
-                def download_task():
-                    try:
-                        result = subprocess.run(curl_cmd, capture_output=True, text=True, check=True)
-                        download_complete.set()
-                    except subprocess.CalledProcessError as e:
-                        download_error[0] = e
-                        download_complete.set()
-                
-                download_thread = threading.Thread(target=download_task)
-                download_thread.start()
-                
-                last_size = 0
-                stall_count = 0
-                last_log_mb = 0
-                cache_clear_counter = 0
-                
-                while not download_complete.is_set():
-                    time.sleep(2)
-                    
-                    if os.path.exists(download_path):
-                        current_size = os.path.getsize(download_path)
-                        
-                        if current_size == last_size and current_size > 0:
-                            stall_count += 1
-                            if stall_count > 60:
-                                self.logger.warning("Download stalled for 2 minutes, aborting...")
-                                break
-                        else:
-                            stall_count = 0
-                        
-                        last_size = current_size
-                        
-                        cache_clear_counter += 1
-                        if cache_clear_counter >= 20:
-                            try:
-                                subprocess.run(['sync'], timeout=5, check=False)
-                                with open('/proc/sys/vm/drop_caches', 'w') as f:
-                                    f.write('1\n')
-                                self.logger.debug("Page cache cleared")
-                                cache_clear_counter = 0
-                            except PermissionError:
-                                if cache_clear_counter == 20:
-                                    self.logger.warning("No permission to clear cache, memory may grow during download")
-                                cache_clear_counter = 0
-                            except Exception as e:
-                                self.logger.debug(f"Cache clear failed: {e}")
-                                cache_clear_counter = 0
-                        
-                        if total_size > 0 and current_size > 0:
-                            progress = (current_size / total_size) * 100
-                            current_mb = current_size / 1024 / 1024
-                            
-                            self._update_ota_state(
-                                progress=int(progress),
-                                message=f'Downloading: {progress:.1f}% ({current_mb:.1f}/{total_mb:.1f} MB)'
-                            )
-                            
-                            if int(current_mb / 10) > int(last_log_mb / 10):
-                                self.logger.info(f"Download progress: {progress:.1f}% ({current_mb:.1f}/{total_mb:.1f} MB)")
-                                last_log_mb = current_mb
-                        elif current_size > 0:
-                            current_mb = current_size / 1024 / 1024
-                            self._update_ota_state(
-                                progress=50,
-                                message=f'Downloading: {current_mb:.1f} MB'
-                            )
-                            
-                            if int(current_mb / 10) > int(last_log_mb / 10):
-                                self.logger.info(f"Downloaded: {current_mb:.1f} MB")
-                                last_log_mb = current_mb
-                
-                download_thread.join(timeout=10)
-                
-                if download_error[0]:
-                    error_msg = f"curl failed: {download_error[0].stderr if download_error[0].stderr else str(download_error[0])}"
-                    self.logger.error(error_msg)
-                    
-                    self._record_ota_failed(ota_id, error_msg)
-                    self._update_ota_state(
-                        ota_status='failed',
-                        progress=100,
-                        finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                        message='Download failed'
-                    )
-                    
-                    if os.path.exists(download_path):
-                        os.remove(download_path)
-                    return False
-                
-                try:
-                    subprocess.run(['sync'], timeout=5, check=False)
-                    with open('/proc/sys/vm/drop_caches', 'w') as f:
-                        f.write('1\n')
-                    self.logger.info("Final cache clear after download")
-                except Exception as e:
-                    self.logger.debug(f"Final cache clear skipped: {e}")
-                
-                if not os.path.exists(download_path):
-                    error_msg = "Download failed: file is missing"
-                    self.logger.error(error_msg)
-                    
-                    self._record_ota_failed(ota_id, error_msg)
-                    self._update_ota_state(
-                        ota_status='failed',
-                        progress=100,
-                        finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                        message='Download failed'
-                    )
-                    return False
-                
-                final_size = os.path.getsize(download_path)
-                if final_size == 0:
-                    error_msg = "Download failed: file is empty"
-                    self.logger.error(error_msg)
-                    
-                    self._record_ota_failed(ota_id, error_msg)
-                    self._update_ota_state(
-                        ota_status='failed',
-                        progress=100,
-                        finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                        message='Download failed'
-                    )
-                    
-                    os.remove(download_path)
-                    return False
-                
-                final_mb = final_size / 1024 / 1024
-                self.logger.info(f"Firmware download completed: {final_mb:.2f} MB")
-                self._update_ota_state(
-                    progress=100,
-                    message='Download completed, verifying MD5...'
-                )
-
-            except Exception as e:
-                error_msg = f"Download error: {str(e)}"
-                self.logger.error(error_msg)
-                
-                self._record_ota_failed(ota_id, error_msg)
-                self._update_ota_state(
-                    ota_status='failed',
-                    progress=100,
-                    finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                    message=error_msg
-                )
-                
-                if os.path.exists(download_path):
-                    os.remove(download_path)
-                return False
-
-            self.logger.info("Verifying MD5 checksum...")
-            calculated_md5 = self._calculate_file_md5(download_path, show_progress=True)
-            
-            if calculated_md5.lower() != md5.lower():
-                error_msg = f'MD5 mismatch! Expected: {md5}, Got: {calculated_md5}'
-                self.logger.error(error_msg)
-                
-                self._record_ota_failed(ota_id, error_msg)
-                self._update_ota_state(
-                    ota_status='failed',
-                    progress=100,
-                    finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                    message='MD5 verification failed'
-                )
-                
-                os.remove(download_path)
-                return False
-            
-            self.logger.info("✓ MD5 verification passed")
-            
+            self.logger.info(f"Firmware download prepared: {downloaded_path}")
+            self._record_ota_start(ota_id, version, url, md5)
             self._record_ota_installing(ota_id)
             self._update_ota_state(
                 ota_status='install',
                 progress=100,
                 message='Starting installation...'
             )
-            
-            return self._perform_upgrade(download_path, version, ota_id)
-            
-        except requests.exceptions.RequestException as e:
-            error_msg = f"Download failed: {str(e)}"
-            self.logger.error(error_msg)
-            
-            self._record_ota_failed(ota_id, error_msg)
-            self._update_ota_state(
-                ota_status='failed',
-                progress=100,
-                finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                message=error_msg
-            )
-            return False
-            
+
+            return self._perform_upgrade(downloaded_path, version, ota_id)
         except Exception as e:
             error_msg = f"OTA update failed: {str(e)}"
-            self.logger.error(error_msg)
-            
-            self._record_ota_failed(ota_id, error_msg)
-            self._update_ota_state(
-                ota_status='failed',
-                progress=100,
-                finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                message=error_msg
-            )
-            
-            import traceback
-            self.logger.error(traceback.format_exc())
-            return False
+            self.logger.error(error_msg, exc_info=True)
+            return self._mark_ota_failed(ota_id, error_msg)
 
     def _perform_upgrade(self, download_path, version, ota_id):
-        self.logger.info("Starting firmware upgrade...")
-        
-        self.logger.info(f"Updating OTA history to 'install' state before upgrade...")
+        self.logger.info(f"Starting firmware upgrade to version {version} from {download_path}")
+
         self._record_ota_installing(ota_id)
-        
-        try:
-            with open(self.OTA_HISTORY_FILE, 'r') as f:
-                history = json.load(f)
-                saved_status = history.get('last_ota', {}).get('ota_status', '')
-                if saved_status == 'install':
-                    self.logger.info(f"✓ OTA history file confirmed: status='install'")
-                else:
-                    self.logger.error(f"✗ OTA history file status mismatch: {saved_status}")
-        except Exception as e:
-            self.logger.error(f"Failed to verify OTA history file: {e}")
-        
         self._update_ota_state(
             ota_status='install',
+            progress=100,
             message='Installing firmware, please wait...'
         )
-        
-        try:
-            import subprocess
-            subprocess.run(['sync'], timeout=5)
-            self.logger.info("Disk sync completed")
-        except Exception as e:
-            self.logger.warning(f"Disk sync failed: {e}")
-        
-        try:
-            self.logger.info("Executing swupdate command...")
-            
-            cmd = [
-                "swupdate",
-                "-k", "/etc/swupdate-public.pem",
-                "-H", "S420:1.0",
-                "-G"
-            ]
-            
-            self.logger.info(f"Command: {' '.join(cmd)}")
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600
-            )
 
-        except subprocess.TimeoutExpired:
-            error_msg = "swupdate timeout (>10 minutes)"
-            self.logger.error(error_msg)
-            
-            self._record_ota_failed(ota_id, error_msg)
-            self._update_ota_state(
-                ota_status='failed',
-                progress=100,
-                finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                message=error_msg
+        try:
+            install_firmware(download_path)
+            self.logger.info(
+                "swupdate completed successfully for ota_id=%s; waiting for reboot/version check",
+                ota_id,
             )
-            return False
-            
+            self._update_ota_state(
+                ota_status='install',
+                progress=100,
+                message='Installation started, waiting for reboot...'
+            )
+            return True
         except Exception as e:
             error_msg = f"swupdate error: {str(e)}"
-            self.logger.error(error_msg)
-            
-            self._record_ota_failed(ota_id, error_msg)
-            self._update_ota_state(
-                ota_status='failed',
-                progress=100,
-                finish_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                message=error_msg
-            )
-            return False
-
-    def _calculate_file_md5(self, filepath, show_progress=False):
-        file_size = os.path.getsize(filepath)
-        file_mb = file_size / 1024 / 1024
-        
-        if show_progress:
-            self.logger.info(f"Calculating MD5 for {file_mb:.2f} MB file...")
-        
-        try:
-            if show_progress:
-                import threading
-                
-                md5_complete = threading.Event()
-                md5_result = [None]
-                md5_error = [None]
-                
-                def calculate_md5():
-                    try:
-                        result = subprocess.run(
-                            ['md5sum', filepath],
-                            capture_output=True,
-                            text=True,
-                            check=True,
-                            timeout=600
-                        )
-                        md5_hash = result.stdout.split()[0]
-                        md5_result[0] = md5_hash
-                    except Exception as e:
-                        md5_error[0] = e
-                    finally:
-                        md5_complete.set()
-                
-                md5_thread = threading.Thread(target=calculate_md5)
-                md5_thread.start()
-                
-                start_time = time.time()
-                last_log_time = start_time
-                
-                while not md5_complete.is_set():
-                    time.sleep(10)
-                    
-                    elapsed = time.time() - start_time
-                    
-                    if time.time() - last_log_time >= 10:
-                        self.logger.info(f"MD5 verification in progress... ({elapsed:.0f}s elapsed)")
-                        last_log_time = time.time()
-                    
-                    try:
-                        with open('/proc/sys/vm/drop_caches', 'w') as f:
-                            f.write('1\n')
-                    except:
-                        pass
-                
-                md5_thread.join(timeout=5)
-                
-                if md5_error[0]:
-                    raise md5_error[0]
-                
-                if md5_result[0]:
-                    self.logger.info(f"MD5 calculation completed: {md5_result[0]}")
-                    return md5_result[0]
-                else:
-                    raise Exception("MD5 calculation failed: no result")
-            
-            else:
-                result = subprocess.run(
-                    ['md5sum', filepath],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=600
-                )
-                md5_hash = result.stdout.split()[0]
-                return md5_hash
-        
-        except subprocess.TimeoutExpired:
-            self.logger.error("MD5 calculation timeout")
-            raise Exception("MD5 calculation timeout")
-        
-        except Exception as e:
-            self.logger.error(f"Error calculating MD5: {e}")
-            raise
+            self.logger.error(error_msg, exc_info=True)
+            return self._mark_ota_failed(ota_id, error_msg)
 
     def _signal_handler(self, sig, frame):
         logging.info("Signal received, stopping...")
