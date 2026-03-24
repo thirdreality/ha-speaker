@@ -38,8 +38,11 @@ function wifi_start()
     if [ $? -eq 0 ]; then
         echo station > /tmp/wifi_mode
         start_wpa_suplicant
+        iw dev wlan0 set power_save off
         iw wlan0 interface add wlan1 type managed
-        ifconfig wlan1 up
+        # Keep wlan1 down in station mode to avoid STA+STA dual-interface
+        # radio contention and background scanning, which cause packet loss
+        # and high latency. wlan1 is only needed when switching to AP mode.
     fi
 }
 

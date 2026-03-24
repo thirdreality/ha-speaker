@@ -52,6 +52,8 @@ wl0id=0x431b
 deadman_to=0xffffffff
 # muxenab: 0x1 for UART enable, 0x10 for Host awake
 muxenab=0x10
+# Disable firmware-level Minimum Power Consumption to reduce WiFi latency
+mpc=0
 # CLDO PWM voltage settings - 0x4 - 1.1 volt
 #cldo_pwm=0x4
 

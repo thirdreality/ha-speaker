@@ -1,0 +1,10 @@
+#!/bin/sh
+# Disable WiFi power save mode after DHCP to reduce network latency.
+# The BCM43438 WiFi chip defaults to power save on, causing 100-500ms
+# latency spikes. This hook runs after every DHCP bound/renew.
+
+case "$1" in
+    bound|renew)
+        iw dev "$interface" set power_save off 2>/dev/null || true
+        ;;
+esac

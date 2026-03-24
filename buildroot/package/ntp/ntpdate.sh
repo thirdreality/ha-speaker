@@ -26,9 +26,9 @@ if [ -x $NTPDATE_BIN ] ; then
 
             if [ ! -f /data/first_wifi_connected ]; then
                 touch /data/first_wifi_connected
-                /etc/init.d/S44bluetooth stop
                 paplay /usr/share/thirdreality/audio/ready_to_connect_ha.wav &
             fi
+            /etc/init.d/S44bluetooth stop
             /usr/share/thirdreality/script/voice-assistant start
             /usr/share/thirdreality/script/music-assistant start
 
