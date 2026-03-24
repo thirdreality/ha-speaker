@@ -456,6 +456,7 @@ class TRSatelliteProtocol(VoiceSatelliteProtocol):
             title=self._update_entity.title,
             release_summary=self._update_entity.release_summary,
             release_url=self._update_entity.release_url,
+            download_url=self._update_entity.download_url,
         )
 
     def _schedule_update_download(self) -> None:
@@ -467,7 +468,7 @@ class TRSatelliteProtocol(VoiceSatelliteProtocol):
     async def _download_update_once(self) -> None:
         try:
             result = self._build_download_result()
-            if not result.release_url:
+            if not result.download_url:
                 raise ValueError("No OTA download URL available")
             if not result.expected_md5:
                 raise ValueError("No OTA MD5 available")

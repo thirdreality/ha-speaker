@@ -34,6 +34,7 @@ _CA_CERT = "/etc/ssl/certs/ca-certificates.crt"
 _DOWNLOAD_CHUNK_SIZE = 64 * 1024
 _CACHE_DROP_WINDOW = 1024 * 1024
 _SWUPDATE_CMD = ["/usr/bin/swupdate", "-G", "-k", "/etc/swupdate-public.pem", "-H", "S420:1.0"]
+_RELEASE_NOTES_URL = "https://github.com/thirdreality/voice-music-assistant/releases"
 
 
 @dataclass
@@ -52,6 +53,7 @@ class TROtaResult:
     title: str = ""
     release_summary: str = ""
     release_url: str = ""
+    download_url: str = ""
 
 
 def load_device_info(path: Path = _DEVICE_CONF) -> Optional[TROtaInfo]:
@@ -144,7 +146,7 @@ def check_version(device_info: TROtaInfo) -> TROtaResult:
         or device_info.current_version
     ).strip()
     expected_md5 = str(data.get("md5") or "").strip().lower()
-    release_url = str(data.get("binUrl") or data.get("altBinUrl") or "").strip()
+    download_url = str(data.get("binUrl") or data.get("altBinUrl") or "").strip()
     release_summary = str(data.get("md5") or result.get("message") or "").strip()
 
     return TROtaResult(
@@ -154,7 +156,8 @@ def check_version(device_info: TROtaInfo) -> TROtaResult:
         expected_md5=expected_md5,
         title="ThirdReality Firmware",
         release_summary=release_summary,
-        release_url=release_url,
+        release_url=_RELEASE_NOTES_URL,
+        download_url=download_url,
     )
 
 
@@ -203,13 +206,13 @@ def download_firmware(
     progress_callback: Optional[Callable[[float, bool], None]] = None,
 ) -> Path:
     """Download firmware to disk with incremental MD5 validation."""
-    if not result.release_url:
-        raise ValueError("No release URL available for download")
+    if not result.download_url:
+        raise ValueError("No download URL available for firmware")
     if not result.expected_md5:
         raise ValueError("No expected MD5 available for download validation")
 
     download_path.parent.mkdir(parents=True, exist_ok=True)
-    destination = _download_target_path(download_path, result.release_url, result.latest_version)
+    destination = _download_target_path(download_path, result.download_url, result.latest_version)
     temp_path = destination.with_suffix(destination.suffix + ".part")
 
     if temp_path.exists():
@@ -229,7 +232,7 @@ def download_firmware(
     total_bytes: Optional[int] = None
 
     try:
-        with urlopen(result.release_url, context=ssl_context, timeout=30) as response, open(temp_path, "wb") as output_file:
+        with urlopen(result.download_url, context=ssl_context, timeout=30) as response, open(temp_path, "wb") as output_file:
             header_length = response.headers.get("Content-Length")
             if header_length and header_length.isdigit():
                 total_bytes = int(header_length)
@@ -324,6 +327,7 @@ class TRUpdateEntity(ESPHomeEntity):
         self.title = "ThirdReality Firmware"
         self.release_summary = ""
         self.release_url = ""
+        self.download_url = ""
         self.in_progress = False
         self.has_progress = False
         self.progress = 0.0
@@ -352,6 +356,7 @@ class TRUpdateEntity(ESPHomeEntity):
         self.title = result.title
         self.release_summary = result.release_summary
         self.release_url = result.release_url
+        self.download_url = result.download_url
 
     def set_download_progress(self, progress: float, *, has_progress: bool) -> None:
         self.in_progress = True
