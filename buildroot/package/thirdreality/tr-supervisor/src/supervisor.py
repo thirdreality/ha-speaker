@@ -5,15 +5,11 @@ import os
 import time
 import logging
 import signal
-import json
 import sys
 import threading
 import uuid
 from datetime import datetime
 
-from .utils import util
-from .http_server import SupervisorHTTPServer
-from .ota import DEFAULT_DOWNLOAD_PATH, OTARelease, download_firmware, install_firmware
 from .sysinfo import SystemInfoUpdater, SystemInfo
 
 # Configure logging
@@ -28,24 +24,16 @@ logging.basicConfig(
 logger = logging.getLogger("Supervisor")
 
 class Supervisor:
-    OTA_HISTORY_FILE = "/data/conf/ota_history.json"
+    OTA_DOWNLOAD_PATH = "/data/software.swu"
 
     def __init__(self):
         self.logger = logging.getLogger("Supervisor")
 
-        self.state_lock = threading.Lock()
-        self.running = threading.Event()
-        self.running.set()
-        self.stop_event = threading.Event()
-        
+        self.shutdown_event = threading.Event()
         self.system_info = SystemInfo()
-
         self.http_server = None
-
+        self.ota_operation_lock = threading.Lock()
         self.sysinfo_update = SystemInfoUpdater(self)
-        
-        # boot up time
-        self.start_time = time.time()
 
         self.ota_state = {
             'ota_id': None,
@@ -56,156 +44,23 @@ class Supervisor:
             'message': 'No OTA in progress'
         }
         self.ota_state_lock = threading.Lock()
-        
-        self.ota_history = self._load_ota_history()
-        
-        self._check_last_ota_status()
-        
-    def _load_ota_history(self):
-        try:
-            if os.path.exists(self.OTA_HISTORY_FILE):
-                with open(self.OTA_HISTORY_FILE, 'r') as f:
-                    data = json.load(f)
-                    self.logger.info(f"OTA history loaded from {self.OTA_HISTORY_FILE}")
-                    return data
-        except Exception as e:
-            self.logger.error(f"Failed to load OTA history: {e}")
-    
-        return {
-            "last_ota": None
-        }
+        self._cleanup_stale_ota_artifacts()
 
-    def _save_ota_history(self):
-        try:
-            os.makedirs(os.path.dirname(self.OTA_HISTORY_FILE), exist_ok=True)
-            
-            with open(self.OTA_HISTORY_FILE, 'w') as f:
-                json.dump(self.ota_history, f, indent=2, ensure_ascii=False)
-            self.logger.info("OTA history saved")
-        except Exception as e:
-            self.logger.error(f"Failed to save OTA history: {e}")
-    
-    def _check_last_ota_status(self):
-        last_ota = self.ota_history.get('last_ota')
+    def _cleanup_stale_ota_artifacts(self):
+        stale_paths = [
+            self.OTA_DOWNLOAD_PATH,
+            f"{self.OTA_DOWNLOAD_PATH}.part",
+            "/data/conf/ota_history.json",
+            "/data/conf/ota_history.json.tmp",
+        ]
 
-        if not last_ota:
-            self.logger.info("No previous OTA found")
-            return
-
-        if last_ota.get('ota_status') == 'download':
-            self.logger.info("Clearing interrupted OTA download state")
-            self.ota_history['last_ota'] = None
-            self._save_ota_history()
-            return
-
-        current_id = last_ota.get('ota_id')
-        if not current_id:
-            self.logger.info("Previous OTA record has no ota_id")
-            return
-        
-        target_version = last_ota.get('target_version', '')
-        if not target_version:
-            self.logger.info("Previous OTA record has no target_version")
-            return
-        
-        try:
-            from .sysinfo import get_device_info
-            device_info = get_device_info()
-            current_version = device_info.get('firmwareVersion', '')
-            
-            self.logger.info(f"Checking OTA status: Current version: {current_version}, Target version: {target_version}")
-            
-            finish_time = time.strftime('%Y-%m-%d %H:%M:%S')
-            
-            if current_version and current_version == target_version:
-                self.logger.info(f"✓ OTA {current_id} succeeded!")
-                last_ota['ota_status'] = 'success'
-                last_ota['progress'] = 100
-                last_ota['finish_time'] = finish_time
-                last_ota['message'] = 'OTA completed successfully'
-                
-                with self.ota_state_lock:
-                    self.ota_state['ota_id'] = current_id
-                    self.ota_state['ota_status'] = 'success'
-                    self.ota_state['progress'] = 100
-                    self.ota_state['start_time'] = last_ota.get('start_time', '')
-                    self.ota_state['finish_time'] = finish_time
-                    self.ota_state['message'] = 'OTA completed successfully'
-                
-                self._save_ota_history()
-            else:
-                if last_ota.get('ota_status') == 'install':
-                    self.logger.warning(f"✗ OTA {current_id} failed - version mismatch")
-                    last_ota['ota_status'] = 'failed'
-                    last_ota['progress'] = 100
-                    last_ota['finish_time'] = finish_time
-                    last_ota['message'] = f'OTA failed: version mismatch (expected: {target_version}, got: {current_version})'
-                    
-                    with self.ota_state_lock:
-                        self.ota_state['ota_id'] = current_id
-                        self.ota_state['ota_status'] = 'failed'
-                        self.ota_state['progress'] = 100
-                        self.ota_state['start_time'] = last_ota.get('start_time', '')
-                        self.ota_state['finish_time'] = finish_time
-                        self.ota_state['message'] = f'Version mismatch (expected: {target_version}, got: {current_version})'
-                    
-                    self._save_ota_history()
-                else:
-                    self.logger.info(f"OTA {current_id} still in progress or not completed")
-            
-        except Exception as e:
-            self.logger.error(f"Error checking OTA status: {e}")
-            if last_ota.get('ota_status') == 'install':
-                last_ota['ota_status'] = 'failed'
-                last_ota['finish_time'] = time.strftime('%Y-%m-%d %H:%M:%S')
-                last_ota['message'] = f'Error checking version: {str(e)}'
-                
-                with self.ota_state_lock:
-                    self.ota_state['ota_id'] = current_id
-                    self.ota_state['ota_status'] = 'failed'
-                    self.ota_state['progress'] = 100
-                    self.ota_state['start_time'] = last_ota.get('start_time', '')
-                    self.ota_state['finish_time'] = time.strftime('%Y-%m-%d %H:%M:%S')
-                    self.ota_state['message'] = f'Error: {str(e)}'
-                
-                self._save_ota_history()
-
-    def _record_ota_start(self, ota_id, version, url, md5):
-        start_time = time.strftime('%Y-%m-%d %H:%M:%S')
-        
-        self.ota_history['last_ota'] = {
-            'ota_id': ota_id,
-            'target_version': version,
-            'url': url,
-            'md5': md5,
-            'ota_status': 'install',
-            'progress': 100,
-            'start_time': start_time,
-            'message': 'Installing firmware...'
-        }
-        self._save_ota_history()
-        self.logger.info(f"OTA install recorded: ID={ota_id}, version={version}")
-        
-    def _record_ota_installing(self, ota_id):
-        last_ota = self.ota_history.get('last_ota')
-        if last_ota and last_ota.get('ota_id') == ota_id:
-            last_ota['ota_status'] = 'install'
-            last_ota['progress'] = 100
-            last_ota['message'] = 'Installing firmware...'
-            self._save_ota_history()
-            self.logger.info(f"OTA {ota_id} status updated: install")
-
-    def _record_ota_failed(self, ota_id, error_msg):
-        last_ota = self.ota_history.get('last_ota')
-        if last_ota and last_ota.get('ota_id') == ota_id:
-            last_ota['ota_status'] = 'failed'
-            last_ota['finish_time'] = time.strftime('%Y-%m-%d %H:%M:%S')
-            last_ota['message'] = f'OTA failed: {error_msg}'
-            self._save_ota_history()
-            self.logger.info(f"OTA {ota_id} failure recorded: {error_msg}")
-        
-    def get_ota_history(self):
-        return self.ota_history.copy()
+        for path in stale_paths:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    self.logger.info("Removed stale OTA artifact: %s", path)
+            except Exception as e:
+                self.logger.warning("Failed to remove stale OTA artifact %s: %s", path, e)
     
     def _update_ota_state(self, **kwargs):
         with self.ota_state_lock:
@@ -216,52 +71,11 @@ class Supervisor:
         with self.ota_state_lock:
             return self.ota_state.copy()
 
-    def get_ota_status_by_id(self, ota_id=None):
-        if ota_id is None:
-            with self.ota_state_lock:
-                current_state = self.ota_state.copy()
-                return {
-                    'ota_id': current_state.get('ota_id'),
-                    'ota_status': current_state.get('ota_status'),
-                    'progress': current_state.get('progress', 0),
-                    'start_time': current_state.get('start_time', ''),
-                    'finish_time': current_state.get('finish_time', ''),
-                    'message': current_state.get('message', '')
-                }
-        
-        with self.ota_state_lock:
-            if self.ota_state.get('ota_id') == ota_id:
-                current_state = self.ota_state.copy()
-                return {
-                    'ota_id': current_state.get('ota_id'),
-                    'ota_status': current_state.get('ota_status'),
-                    'progress': current_state.get('progress', 0),
-                    'start_time': current_state.get('start_time', ''),
-                    'finish_time': current_state.get('finish_time', ''),
-                    'message': current_state.get('message', '')
-                }
-        
-        record = self.ota_history['records'].get(ota_id)
-        if record:
-            return {
-                'ota_id': record.get('ota_id'),
-                'ota_status': record.get('ota_status'),
-                'progress': record.get('progress', 0),
-                'start_time': record.get('start_time', ''),
-                'finish_time': record.get('finish_time', ''),
-                'message': record.get('message', '')
-            }
-        
-        return {
-            'ota_id': ota_id,
-            'ota_status': 'error',
-            'message': 'OTA ID not found'
-        }
-
     def _start_http_server(self):
         """Start HTTP server"""
         if not self.http_server:
             try:
+                from .http_server import SupervisorHTTPServer
                 self.http_server = SupervisorHTTPServer(self, port=8086)
                 self.http_server.start()
                 logger.info("HTTP server started")
@@ -285,16 +99,18 @@ class Supervisor:
 
     def perform_reboot(self):
         logging.info("Performing reboot...")
+        from .utils import util
         util.perform_reboot()
 
     def perform_factory_reset(self):
         logging.info("Performing factory reset...")
+        from .utils import util
         util.perform_factory_reset()
 
     def _mark_ota_failed(self, ota_id, error_msg):
         finish_time = time.strftime('%Y-%m-%d %H:%M:%S')
-        self._record_ota_failed(ota_id, error_msg)
         self._update_ota_state(
+            ota_id=ota_id,
             ota_status='failed',
             progress=100,
             finish_time=finish_time,
@@ -312,13 +128,46 @@ class Supervisor:
             message=message
         )
 
-    def perform_ota_update(self, url, version, md5, ota_id=None):
+    def start_ota_update_async(self, *, url, version, md5):
+        if not self.ota_operation_lock.acquire(blocking=False):
+            raise RuntimeError("OTA update already in progress")
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_id = str(uuid.uuid4())[:8]
+        ota_id = f"ota_{timestamp}_{unique_id}"
+        worker = threading.Thread(
+            target=self.perform_ota_update,
+            kwargs={
+                "url": url,
+                "version": version,
+                "md5": md5,
+                "ota_id": ota_id,
+                "lock_acquired": True,
+            },
+            daemon=True,
+        )
+        worker.start()
+        return ota_id
+
+    def perform_ota_update(self, url, version, md5, ota_id=None, lock_acquired=False):
         if ota_id is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             unique_id = str(uuid.uuid4())[:8]
             ota_id = f"ota_{timestamp}_{unique_id}"
 
+        owns_lock = lock_acquired
+        if not owns_lock and not self.ota_operation_lock.acquire(blocking=False):
+            error_msg = "OTA update already in progress"
+            self.logger.warning(error_msg)
+            return self._mark_ota_failed(ota_id, error_msg)
+        owns_lock = True
+
         try:
+            from .ota import (
+                DEFAULT_DOWNLOAD_PATH,
+                OTARelease,
+                download_firmware,
+            )
             self._update_ota_state(
                 ota_id=ota_id,
                 ota_status='download',
@@ -339,8 +188,6 @@ class Supervisor:
             )
 
             self.logger.info(f"Firmware download prepared: {downloaded_path}")
-            self._record_ota_start(ota_id, version, url, md5)
-            self._record_ota_installing(ota_id)
             self._update_ota_state(
                 ota_status='install',
                 progress=100,
@@ -352,11 +199,13 @@ class Supervisor:
             error_msg = f"OTA update failed: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             return self._mark_ota_failed(ota_id, error_msg)
+        finally:
+            if owns_lock:
+                self.ota_operation_lock.release()
 
     def _perform_upgrade(self, download_path, version, ota_id):
         self.logger.info(f"Starting firmware upgrade to version {version} from {download_path}")
 
-        self._record_ota_installing(ota_id)
         self._update_ota_state(
             ota_status='install',
             progress=100,
@@ -364,6 +213,7 @@ class Supervisor:
         )
 
         try:
+            from .ota import install_firmware
             install_firmware(download_path)
             self.logger.info(
                 "swupdate completed successfully for ota_id=%s; waiting for reboot/version check",
@@ -388,7 +238,7 @@ class Supervisor:
     def cleanup(self):
         """Clean up resources"""
         logger.info("Cleaning up resources...")
-        self.running.clear()
+        self.shutdown_event.set()
 
         # Stop HTTP server
         self._stop_http_server()
@@ -406,8 +256,7 @@ class Supervisor:
 
         logger.info("Supervisor started, waiting for signals...")
         try:
-            while self.running.is_set():
-                time.sleep(1)
+            self.shutdown_event.wait()
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
         finally:

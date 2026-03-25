@@ -1,5 +1,9 @@
-# Supervisor package init
+"""Supervisor package init."""
 
-from .supervisor import main
+__all__ = ["main"]
 
-__all__ = ['main']
+
+def main():
+    from .supervisor import main as supervisor_main
+
+    return supervisor_main()
