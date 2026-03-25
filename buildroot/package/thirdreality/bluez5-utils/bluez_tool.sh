@@ -8,7 +8,7 @@ mkdir -p /var/run/thirdreality/
 
 check_hci0()
 {
-	local cnt=10
+	local cnt=15
 	while [ $cnt -gt 0 ]; do
 		hciconfig hci0 2> /dev/null
 		if [ $? -eq 1 ];then
