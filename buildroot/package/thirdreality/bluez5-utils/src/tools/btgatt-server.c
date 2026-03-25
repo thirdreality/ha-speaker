@@ -287,7 +287,14 @@ static void att_disconnect_cb(int err, void *user_data)
 	(void)server;
 	(void)err;
 
+	printf("[BLE] Client disconnected (err=%d)\n", err);
 	client_connected = false;
+
+	/* Reset error state on disconnect so next client doesn't see stale error */
+	if (!wifi_config_completed) {
+		improv_state = 0x02; // Back to Authorized
+		improv_error = 0x00; // Clear error
+	}
 
 	if (wifi_config_completed) {
 		should_exit = true;
@@ -307,12 +314,18 @@ static void send_notification_raw(struct server *server, const uint8_t *data, si
 	uint16_t mtu = bt_gatt_server_get_mtu(server->gatt);
 	size_t max_payload = mtu - 3;
 
+	printf("[TX] handle=0x%04X len=%zu mtu=%u: ", char_handle, len, mtu);
+	for (size_t i = 0; i < len; i++)
+		printf("%02X ", data[i]);
+	printf("\n");
+
 	size_t offset = 0;
 	while (offset < len) {
 		size_t chunk = (len - offset > max_payload) ? max_payload : (len - offset);
 		bool result = bt_gatt_server_send_notification(server->gatt, char_handle, data + offset, chunk,
-								 server->notify_confirm);
+							 server->notify_confirm);
 		if (!result) {
+			printf("[TX] notification failed at offset=%zu\n", offset);
 			break;
 		}
 		offset += chunk;
@@ -414,21 +427,32 @@ static void improv_send_result(struct server *server, uint8_t cmd, const char **
 
 static void improv_notify_state(struct server *server)
 {
+	const char *state_str[] = { "0x00", "Awaiting Auth(0x01)", "Authorized(0x02)", "Provisioning(0x03)", "Provisioned(0x04)" };
+	const char *s = (improv_state <= 0x04) ? state_str[improv_state] : "Unknown";
+	printf("[TX] Notify state -> %s\n", s);
 	improv_update_adv_state();
 	uint8_t val = improv_state;
 	pthread_mutex_lock(&server->notification_lock);
 	if (server->notifying && client_connected) {
 		send_notification_raw(server, &val, 1, improv_chars.state_value_handle);
+	} else {
+		printf("[TX] state notify skipped (notifying=%d connected=%d)\n", server->notifying, client_connected);
 	}
 	pthread_mutex_unlock(&server->notification_lock);
 }
 
 static void improv_notify_error(struct server *server)
 {
+	const char *err_str[] = { "No Error(0x00)", "Invalid RPC(0x01)", "Unknown CMD(0x02)", "Unable to Connect(0x03)",
+				  "Not Authorized(0x04)", "Unknown Error(0x05)" };
+	const char *e = (improv_error <= 0x05) ? err_str[improv_error] : "Unknown";
+	printf("[TX] Notify error -> %s\n", e);
 	uint8_t val = improv_error;
 	pthread_mutex_lock(&server->notification_lock);
 	if (server->notifying && client_connected) {
 		send_notification_raw(server, &val, 1, improv_chars.error_value_handle);
+	} else {
+		printf("[TX] error notify skipped (notifying=%d connected=%d)\n", server->notifying, client_connected);
 	}
 	pthread_mutex_unlock(&server->notification_lock);
 }
@@ -441,6 +465,7 @@ static void improv_send_device_info(struct server *server)
 	const char *dev_name = get_device_name();
 	const char *result_strs[] = { fw_name, fw_ver, hw, dev_name };
 
+	printf("[TX] Device info: fw_name=%s fw_ver=%s hw=%s dev_name=%s\n", fw_name, fw_ver, hw, dev_name);
 	improv_send_result(server, 0x03, result_strs, 4);
 }
 
@@ -448,6 +473,7 @@ static void improv_handle_rpc_packet(struct server *server, const uint8_t *value
 {
 	dump_hex("RPC full packet", value, len);
 	if (len < 3) {
+		printf("[RX] RPC packet too short (len=%zu), sending error 0x01\n", len);
 		improv_error = 0x01;
 		improv_notify_error(server);
 		return;
@@ -456,30 +482,36 @@ static void improv_handle_rpc_packet(struct server *server, const uint8_t *value
 	uint8_t cmd = value[0];
 	uint8_t dlen = value[1];
 
+	printf("[RX] RPC cmd=0x%02X dlen=%u total_len=%zu\n", cmd, dlen, len);
+
 	if (dlen + 3 != len) {
+		printf("[RX] RPC length mismatch: expected %u+3=%u but got %zu\n", dlen, dlen + 3, len);
 		improv_error = 0x01;
 		improv_notify_error(server);
 		return;
 	}
 
 	if (checksum8(value, len - 1) != value[len - 1]) {
+		printf("[RX] RPC checksum error: expected 0x%02X got 0x%02X\n",
+		       checksum8(value, len - 1), value[len - 1]);
 		improv_error = 0x01;
 		improv_notify_error(server);
 		return;
 	}
 
 	if (cmd == 0x02) {
-		// Identify (no result)
+		printf("[RX] CMD: Identify\n");
 		improv_error = 0x00;
 		improv_notify_error(server);
 		return;
 	} else if (cmd == 0x03) {
-		// Device Info
+		printf("[RX] CMD: Get Device Info\n");
 		improv_error = 0x00;
 		improv_notify_error(server);
 		improv_send_device_info(server);
 		return;
 	} else if (cmd != 0x01) {
+		printf("[RX] CMD: Unknown command 0x%02X\n", cmd);
 		improv_error = 0x02;
 		improv_notify_error(server);
 		return;
@@ -521,29 +553,37 @@ static void improv_handle_rpc_packet(struct server *server, const uint8_t *value
 	memcpy(ssid_buf, ssid, ssid_len);
 	memcpy(pw_buf, pw, pw_len);
 
+	printf("[RX] CMD: Send WiFi Settings - SSID='%s' PW='%s'\n",
+	       ssid_buf, pw_len > 0 ? "(provided)" : "(empty)");
+
 	improv_state = 0x03; // Provisioning
 	improv_error = 0x00;
 	improv_notify_state(server);
+	improv_notify_error(server); // Clear any stale error from previous attempt
 
 	char ip[64] = { 0 };
 	if (process_wifi_config_improv(ssid_buf, pw_buf, ip, sizeof(ip)) == 0) {
+		printf("[WiFi] Connected successfully, IP=%s\n", ip);
 		improv_state = 0x04; // Provisioned
 		improv_error = 0x00;
 		improv_notify_state(server);
 
 		char url[96];
 		snprintf(url, sizeof(url), "http://%s", ip);
+		printf("[TX] RPC result: url=%s\n", url);
 		const char *result_strs[] = { url };
 		improv_send_result(server, cmd, result_strs, 1);
 
 		wifi_config_completed = true;
 		mainloop_add_timeout(2000, delayed_exit_cb, NULL, NULL);
 	} else {
+		printf("[WiFi] Connection failed for SSID='%s'\n", ssid_buf);
 		improv_state = 0x02; // Authorized
 		improv_error = 0x03; // Unable to connect
 		improv_notify_state(server);
 		improv_notify_error(server);
 
+		printf("[TX] RPC result: empty (failed)\n");
 		const char *result_strs[] = { "" };
 		improv_send_result(server, cmd, result_strs, 1);
 	}
@@ -675,6 +715,9 @@ static void cccd_write_cb(struct gatt_db_attribute *attrib, unsigned int id, uin
 	}
 
 	uint16_t cccd_value = (value[1] << 8) | value[0];
+
+	printf("[RX] CCCD write handle=0x%04X value=0x%04X (%s)\n", cccd_handle, cccd_value,
+	       (cccd_value & 0x01) ? "Notify" : (cccd_value & 0x02) ? "Indicate" : "Disabled");
 
 	pthread_mutex_lock(&server->notification_lock);
 
@@ -1469,6 +1512,7 @@ int main(void)
 
 		stop_advertising();
 		client_connected = true;
+		printf("[BLE] Client connected\n");
 
 		mainloop_init();
 
