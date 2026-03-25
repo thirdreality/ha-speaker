@@ -19,7 +19,7 @@ fi
 
 if [ -x $NTPDATE_BIN ] ; then
     while true ; do
-        $NTPDATE_BIN -v -b -t 5 $NTPDATE_OPTS $NTPSERVERS > /dev/null 2>&1
+        $NTPDATE_BIN -v -b $NTPDATE_OPTS $NTPSERVERS > /dev/null 2>&1
         if [ $? = 0 ]; then
             echo -n "Getting initial time via ntp"
             echo "ntpdate OK"
