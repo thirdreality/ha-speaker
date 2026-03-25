@@ -19,8 +19,8 @@ index 0000000..c1a1633
 +
 +# Additional command line options that will be passed to snapclient
 +# note that user/group should be configured in the init.d script or the systemd unit file
-+# For a list of available options, invoke "snapclient --help" 
-+SNAPCLIENT_OPTS="--player pulse"
++# For a list of available options, invoke "snapclient --help"
++SNAPCLIENT_OPTS="--player pulse:buffer_time=500"
 -- 
 2.40.1
 

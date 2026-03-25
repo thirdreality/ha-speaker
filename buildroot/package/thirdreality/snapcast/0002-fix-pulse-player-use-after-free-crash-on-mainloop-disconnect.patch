@@ -1,0 +1,43 @@
+From eb16eeb189bf4fcbc03d0fe431e0c11491bf0e21 Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Wed, 25 Mar 2026 11:09:39 +0800
+Subject: [PATCH] fix: avoid use-after-free crash in PulsePlayer when
+ disconnecting from within mainloop callback
+
+---
+ client/player/pulse_player.cpp | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/client/player/pulse_player.cpp b/client/player/pulse_player.cpp
+index dfd6ef1..6146659 100644
+--- a/client/player/pulse_player.cpp
++++ b/client/player/pulse_player.cpp
+@@ -186,6 +186,10 @@ void PulsePlayer::worker()
+     {
+         pa_mainloop_run(pa_ml_, nullptr);
+ 
++        // Disconnect after mainloop exits. Must be called here (outside of any PA callback)
++        // to safely free pa_ml_, pa_ctx_, and playstream_ without use-after-free.
++        disconnect();
++
+         // if we are still active, wait for a chunk and attempt to reconnect
+         while (active_ && !stream_->waitForChunk(100ms))
+         {
+@@ -353,8 +357,12 @@ void PulsePlayer::writeCallback(pa_stream* stream, size_t nbytes)
+         // can become idle/suspended.
+         if (chronos::getTickCount() - last_chunk_tick_ > 5000)
+         {
+-            LOG(INFO, LOG_TAG) << "No chunk received for 5000ms, disconnecting from pulse.\n";
+-            this->disconnect();
++            LOG(INFO, LOG_TAG) << "No chunk received for 5000ms, signaling pulse mainloop to quit.\n";
++            // Fix: do NOT call disconnect() from within a PulseAudio mainloop callback.
++            // Calling pa_mainloop_free() while inside pa_mainloop_run() causes a use-after-free
++            // crash (SIGSEGV in libc). Instead, only signal the mainloop to quit; the worker()
++            // thread will call disconnect() safely after pa_mainloop_run() returns.
++            pa_mainloop_quit(pa_ml_, 0);
+             return;
+         }
+         // LOG(TRACE, LOG_TAG) << "Failed to get chunk. Playing silence.\n";
+-- 
+2.40.1
+

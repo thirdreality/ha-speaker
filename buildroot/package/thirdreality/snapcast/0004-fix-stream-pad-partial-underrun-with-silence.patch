@@ -1,0 +1,51 @@
+From 9c4e9af8b7f91e0b57f3d7e6a1c4fd4ef5c0a8d1 Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Wed, 25 Mar 2026 14:05:00 +0800
+Subject: [PATCH] fix: preserve partial audio on stream underrun and pad tail
+ with silence
+
+On unstable WiFi, the decoder queue often has most of the requested frames but
+not the full callback size, e.g. "requested 1440, available 1420". The current
+logic throws an exception for that case, causing PulsePlayer to treat the whole
+callback as failed and overwrite the entire output buffer with silence.
+
+That amplifies minor queue jitter into audible dropouts and also prevents
+PulsePlayer from refreshing its "last chunk received" timestamp, which makes
+5-second idle disconnects more likely during repeated partial underruns.
+
+Instead, keep the frames that are already available, pad only the missing tail
+with silence, and force the next iteration back through hard sync to recover
+timing cleanly once more data arrives.
+---
+ client/stream.cpp | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/client/stream.cpp b/client/stream.cpp
+index 8af8c0a..c3f4580 100644
+--- a/client/stream.cpp
++++ b/client/stream.cpp
+@@ -156,8 +156,20 @@ cs::time_point_clk Stream::getNextPlayerChunk(void* outputBuffer, uint32_t frame
+     while (read < frames)
+     {
+         read += chunk_->readFrames(static_cast<char*>(outputBuffer) + read * format_.frameSize(), frames - read);
+-        if ((read < frames) && chunk_->isEndOfChunk() && !chunks_.try_pop(chunk_))
+-            throw SnapException("Not enough frames available, requested frames: " + cpt::to_string(frames) + ", available: " + cpt::to_string(read));
++        if ((read < frames) && chunk_->isEndOfChunk() && !chunks_.try_pop(chunk_))
++        {
++            static utils::logging::TimeConditional underrun_cond(1s);
++            LOG(INFO, LOG_TAG) << underrun_cond << "Partial chunk underrun, requested frames: " << frames << ", available: " << read
++                               << ". Padding remainder with silence\n";
++
++            getSilentPlayerChunk(static_cast<char*>(outputBuffer) + read * format_.frameSize(), frames - read);
++
++            // Force the next iteration through hard sync so playback can recover cleanly
++            // after this queue underrun once fresh chunks arrive again.
++            hard_sync_ = true;
++            chunk_ = nullptr;
++            break;
++        }
+     }
+     return tp;
+ }
+-- 
+2.40.1

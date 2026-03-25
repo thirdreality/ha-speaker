@@ -1,0 +1,57 @@
+From 5f0c04af1d73884d01a944e2606544c52318e2ea Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Wed, 25 Mar 2026 11:39:58 +0800
+Subject: [PATCH] fix: increase time sync timeout 2s->10s, reduce quick syncs
+ 50->20 for poor WiFi
+
+On congested 2.4GHz WiFi with 65%+ TX retry rate:
+- 2s time sync timeout causes constant reconnects from WiFi-induced TCP delays
+  even when the underlying connection is fundamentally healthy. Increased to 10s
+  to survive brief congestion bursts without breaking the session.
+- 50 quick syncs (serial, 1 per RTT ~70ms) take 2-3.5s to complete. During this
+  window diffToServer_=0, causing all audio chunks to appear 17+ hours in the
+  future (monotonic clock boot-time offset between server and client). This leads
+  to silence and triggers the 5000ms no-chunk PulseAudio disconnect before the
+  diff can be established. 20 quick syncs complete in ~1.4s, well within the
+  5s window, allowing stable audio sync before the first timeout opportunity.
+---
+ client/controller.cpp | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/client/controller.cpp b/client/controller.cpp
+index bd945d1..07de91f 100644
+--- a/client/controller.cpp
++++ b/client/controller.cpp
+@@ -330,7 +330,11 @@ void Controller::getNextMessage()
+ void Controller::sendTimeSyncMessage(int quick_syncs)
+ {
+     auto timeReq = std::make_shared<msg::Time>();
+-    clientConnection_->sendRequest<msg::Time>(timeReq, 2s,
++    // Increased from 2s to 10s: on congested 2.4GHz WiFi with 65%+ TX retry rate,
++    // a 2s TCP timeout is too short and causes constant reconnects even when the
++    // connection is fundamentally healthy. 10s allows surviving brief WiFi congestion
++    // bursts without breaking the session.
++    clientConnection_->sendRequest<msg::Time>(timeReq, 10s,
+                                               [this, quick_syncs](const boost::system::error_code& ec, const std::unique_ptr<msg::Time>& response) mutable
+     {
+         if (ec)
+@@ -514,8 +518,14 @@ void Controller::worker()
+                     LOG(INFO, LOG_TAG) << "ServerSettings - buffer: " << serverSettings_->getBufferMs() << ", latency: " << serverSettings_->getLatency()
+                                        << ", volume: " << serverSettings_->getVolume() << ", muted: " << serverSettings_->isMuted() << "\n";
+ 
+-                    // Do initial time sync with the server
+-                    sendTimeSyncMessage(50);
++                    // Do initial time sync with the server.
++                    // 20 quick syncs (at ~100us timer intervals, ~70ms RTT each = ~1.4s total)
++                    // is enough to establish a stable median diff from 20 samples.
++                    // 50 quick syncs was taking 2-3.5s, during which diff=0 causes
++                    // early chunks to appear 17+ hours in the future (monotonic clock
++                    // offset between server and client boot times), leading to silence
++                    // and triggering the 5000ms no-chunk PulseAudio disconnect.
++                    sendTimeSyncMessage(20);
+                 }
+             });
+         }
+-- 
+2.40.1
+
