@@ -1,12 +1,199 @@
 #!/bin/sh
+#
+# S99ha-speaker: unified init script and service monitor for HA speaker.
+#
+# Manages:
+#   - netmonitor       (WiFi/internet connectivity state machine)
+#   - supervisor       (python3 -m supervisor, HA integration)
+#   - voice-assistant  (python3 -m linux_voice_assistant)
+#   - snapclient       (music streaming)
+#   - WiFi power save  (BCM43438/AP6212 DHD firmware resets it after association)
+#   - pulseaudio       (reboot device if it dies)
+#
+# Usage:
+#   S99ha-speaker start|stop|restart
+#   S99ha-speaker <service> start|stop|restart
+#
+# Services: netmonitor, supervisor, voice-assistant, snapclient
 
+PIDDIR=/var/run/thirdreality
+MONITOR_PIDFILE=$PIDDIR/ha-speaker.pid
+NETMONITOR_PIDFILE=$PIDDIR/netmonitor.pid
+VOICE_PIDFILE=$PIDDIR/voice-assistant.pid
+SUPERVISOR_PIDFILE=$PIDDIR/supervisor.pid
 DEVICE_CONF="/data/conf/device.json"
 
-SUPERVISOR_PID="/var/run/thirdreality/supervisor.pid"
-NETMONITOR_PID="/var/run/thirdreality/netmonitor.pid"
+SNAPCLIENT=/usr/bin/snapclient
+[ -r /etc/default/snapclient ] && . /etc/default/snapclient
+SNAPCLIENT_OPTS="-d $SNAPCLIENT_OPTS"
 
-start_service()
-{
+CHECK_INTERVAL=10
+
+# Disable flag files: when present, the monitor loop skips restarting that service.
+# Created by:  S99ha-speaker <service> stop
+# Removed by:  S99ha-speaker <service> start
+DISABLE_NETMONITOR=/tmp/ha_disable_netmonitor
+DISABLE_SUPERVISOR=/tmp/ha_disable_supervisor
+DISABLE_VOICE=/tmp/ha_disable_voice
+DISABLE_SNAPCLIENT=/tmp/ha_disable_snapclient
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+is_running() {
+    local pidfile="$1"
+    [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# netmonitor
+# ---------------------------------------------------------------------------
+
+start_netmonitor() {
+    is_running "$NETMONITOR_PIDFILE" && return 0
+    rm -f "$NETMONITOR_PIDFILE" "$DISABLE_NETMONITOR"
+    /usr/share/thirdreality/script/netmonitor &
+    echo $! > "$NETMONITOR_PIDFILE"
+}
+
+stop_netmonitor() {
+    touch "$DISABLE_NETMONITOR"
+    if is_running "$NETMONITOR_PIDFILE"; then
+        kill "$(cat "$NETMONITOR_PIDFILE")" 2>/dev/null
+    fi
+    rm -f "$NETMONITOR_PIDFILE"
+}
+
+# ---------------------------------------------------------------------------
+# supervisor
+# ---------------------------------------------------------------------------
+
+start_supervisor() {
+    is_running "$SUPERVISOR_PIDFILE" && return 0
+    rm -f "$SUPERVISOR_PIDFILE" "$DISABLE_SUPERVISOR"
+    python3 -m supervisor 2>/dev/null &
+    echo $! > "$SUPERVISOR_PIDFILE"
+}
+
+stop_supervisor() {
+    touch "$DISABLE_SUPERVISOR"
+    if is_running "$SUPERVISOR_PIDFILE"; then
+        kill "$(cat "$SUPERVISOR_PIDFILE")" 2>/dev/null
+    fi
+    rm -f "$SUPERVISOR_PIDFILE"
+}
+
+# ---------------------------------------------------------------------------
+# voice-assistant
+# ---------------------------------------------------------------------------
+
+start_voice_assistant() {
+    is_running "$VOICE_PIDFILE" && return 0
+    rm -f "$VOICE_PIDFILE" "$DISABLE_VOICE"
+    local spk_name
+    spk_name=$(jq -r '.device.name // "thirdreality-speaker"' "$DEVICE_CONF")
+    python3 -m linux_voice_assistant \
+        --name "$spk_name" \
+        --wake-model "okay_nabu" \
+        --preferences-file "/data/conf/sound.json" \
+        --network-interface wlan0 &
+    echo $! > "$VOICE_PIDFILE"
+}
+
+stop_voice_assistant() {
+    touch "$DISABLE_VOICE"
+    if is_running "$VOICE_PIDFILE"; then
+        kill "$(cat "$VOICE_PIDFILE")" 2>/dev/null
+        sleep 1
+        kill -9 "$(cat "$VOICE_PIDFILE")" 2>/dev/null
+    fi
+    rm -f "$VOICE_PIDFILE"
+}
+
+# ---------------------------------------------------------------------------
+# snapclient
+# ---------------------------------------------------------------------------
+
+start_snapclient() {
+    pidof snapclient > /dev/null 2>&1 && return 0
+    rm -f "$DISABLE_SNAPCLIENT"
+    start-stop-daemon --start --quiet --name snapclient --exec "$SNAPCLIENT" -- $SNAPCLIENT_OPTS
+}
+
+stop_snapclient() {
+    touch "$DISABLE_SNAPCLIENT"
+    start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --name snapclient
+    start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --exec "$SNAPCLIENT"
+}
+
+# ---------------------------------------------------------------------------
+# WiFi power save
+# ---------------------------------------------------------------------------
+
+# wifi_power_save_check() {
+#     if iw dev wlan0 get power_save 2>/dev/null | grep -q "Power save: on"; then
+#         iw dev wlan0 set power_save off 2>/dev/null
+#     fi
+# }
+
+# ---------------------------------------------------------------------------
+# Monitor loop
+# ---------------------------------------------------------------------------
+
+monitor_loop() {
+    while true; do
+        # 1. WiFi power save
+        # wifi_power_save_check
+
+        # 2. netmonitor
+        if [ ! -f "$DISABLE_NETMONITOR" ] && ! is_running "$NETMONITOR_PIDFILE"; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] netmonitor not running, restarting..."
+            start_netmonitor
+        fi
+
+        # 3. supervisor
+        if [ ! -f "$DISABLE_SUPERVISOR" ] && ! is_running "$SUPERVISOR_PIDFILE"; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] supervisor not running, restarting..."
+            start_supervisor
+        fi
+
+        # 4. voice-assistant
+        if [ ! -f "$DISABLE_VOICE" ] && ! is_running "$VOICE_PIDFILE"; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] voice-assistant not running, restarting..."
+            start_voice_assistant
+        fi
+
+        # 5. snapclient
+        if [ ! -f "$DISABLE_SNAPCLIENT" ] && ! pidof snapclient > /dev/null 2>&1; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] snapclient not running, restarting..."
+            start_snapclient
+        fi
+
+        # 6. pulseaudio
+        if ! pidof pulseaudio > /dev/null 2>&1; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] pulseaudio died, rebooting..."
+            sync
+            sleep 3
+            reboot -f
+        fi
+
+        sleep $CHECK_INTERVAL
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Daemon lifecycle
+# ---------------------------------------------------------------------------
+
+start() {
+    mkdir -p "$PIDDIR"
+
+    if is_running "$MONITOR_PIDFILE"; then
+        echo "ha-speaker already running (PID: $(cat "$MONITOR_PIDFILE"))"
+        exit 0
+    fi
+
     /usr/share/thirdreality/script/setup_env.sh
 
     NETWORK_STATUS=$(jq -r '.network.status // "disconnected"' "$DEVICE_CONF" 2>/dev/null)
@@ -15,39 +202,104 @@ start_service()
         paplay /usr/share/thirdreality/audio/setup_mode.wav &
     fi
 
-    python3 -m supervisor 2>/dev/null &
-    echo $! > "$SUPERVISOR_PID"
+    # voice-assistant and snapclient require network (NTP sync).
+    # Disable them at boot; ntpdate.sh enables them after first sync.
+    touch "$DISABLE_VOICE" "$DISABLE_SNAPCLIENT"
 
-    /usr/share/thirdreality/script/netmonitor start
+    start_netmonitor
+    start_supervisor
+
+    monitor_loop &
+    echo $! > "$MONITOR_PIDFILE"
+    echo "ha-speaker started (PID: $(cat "$MONITOR_PIDFILE"))"
 }
 
-stop_pid()
-{
-    local pidfile="$1"
-    if [ -f "$pidfile" ]; then
-        kill "$(cat "$pidfile")" 2>/dev/null
-        rm -f "$pidfile"
+stop() {
+    if is_running "$MONITOR_PIDFILE"; then
+        kill "$(cat "$MONITOR_PIDFILE")" 2>/dev/null
+        echo "ha-speaker stopped (PID: $(cat "$MONITOR_PIDFILE"))"
+    else
+        echo "ha-speaker not running"
     fi
-}
+    rm -f "$MONITOR_PIDFILE"
 
-stop_service()
-{
-    echo "Stopping services..."
     /etc/init.d/S44bluetooth stop
-
-    stop_pid "$SUPERVISOR_PID"
-
-    /usr/share/thirdreality/script/netmonitor stop
-    /usr/share/thirdreality/script/voice-assistant stop
-    /usr/share/thirdreality/script/music-assistant stop
+    stop_voice_assistant
+    stop_snapclient
+    stop_supervisor
+    stop_netmonitor
+    # Clear disable flags so next start brings everything up
+    rm -f "$DISABLE_NETMONITOR" "$DISABLE_SUPERVISOR" "$DISABLE_VOICE" "$DISABLE_SNAPCLIENT"
 }
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+# ---------------------------------------------------------------------------
+# Per-service subcommands:  S99ha-speaker <service> start|stop|restart
+# ---------------------------------------------------------------------------
+
+service_cmd() {
+    local svc="$1"
+    local action="$2"
+    case "$svc" in
+        netmonitor)
+            case "$action" in
+                start)   start_netmonitor ;;
+                stop)    stop_netmonitor ;;
+                restart) stop_netmonitor; sleep 1; start_netmonitor ;;
+                *) echo "Usage: $0 netmonitor {start|stop|restart}"; exit 1 ;;
+            esac
+            ;;
+        supervisor)
+            case "$action" in
+                start)   start_supervisor ;;
+                stop)    stop_supervisor ;;
+                restart) stop_supervisor; sleep 1; start_supervisor ;;
+                *) echo "Usage: $0 supervisor {start|stop|restart}"; exit 1 ;;
+            esac
+            ;;
+        voice-assistant)
+            case "$action" in
+                start)   start_voice_assistant ;;
+                stop)    stop_voice_assistant ;;
+                restart) stop_voice_assistant; sleep 1; start_voice_assistant ;;
+                *) echo "Usage: $0 voice-assistant {start|stop|restart}"; exit 1 ;;
+            esac
+            ;;
+        snapclient)
+            case "$action" in
+                start)   start_snapclient ;;
+                stop)    stop_snapclient ;;
+                restart) stop_snapclient; sleep 1; start_snapclient ;;
+                *) echo "Usage: $0 snapclient {start|stop|restart}"; exit 1 ;;
+            esac
+            ;;
+        *)
+            echo "Unknown service: $svc"
+            echo "Services: netmonitor, supervisor, voice-assistant, snapclient"
+            exit 1
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 case "$1" in
-    start)
-        start_service
-    ;;
-    stop)
-        stop_service
-    ;;
-    *) echo "Usage: $0 {start|stop}" ;;
+    start)   start   ;;
+    stop)    stop    ;;
+    restart) restart ;;
+    netmonitor|supervisor|voice-assistant|snapclient)
+        service_cmd "$1" "$2"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        echo "       $0 {netmonitor|supervisor|voice-assistant|snapclient} {start|stop|restart}"
+        exit 1
+        ;;
 esac

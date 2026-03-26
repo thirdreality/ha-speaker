@@ -143,6 +143,118 @@ static void delayed_exit_cb(int timeout_id, void *user_data)
 	mainloop_quit();
 }
 
+static int run_wifi_connect_command(const char *ssid, const char *password)
+{
+	const char *script = "/usr/share/thirdreality/script/wifi_connect";
+	const char *safe_password = password ? password : "";
+	pid_t pid;
+	int status;
+
+	pid = fork();
+	if (pid < 0)
+		return -1;
+
+	if (pid == 0) {
+		execl(script, script, "connect", ssid, safe_password, (char *)NULL);
+		_exit(127);
+	}
+
+	do {
+		if (waitpid(pid, &status, 0) < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		break;
+	} while (true);
+
+	if (!WIFEXITED(status))
+		return -1;
+
+	return WEXITSTATUS(status);
+}
+
+static void format_wifi_error_response(int exit_code, char *response, size_t response_len)
+{
+	const char *err_msg;
+
+	switch (exit_code) {
+	case 10:
+		err_msg = "SSID not found";
+		break;
+	case 12:
+		err_msg = "Failed to get IP";
+		break;
+	case 13:
+		err_msg = "Connect failed";
+		break;
+	case 14:
+		err_msg = "Switch WiFi failed";
+		break;
+	case 127:
+		err_msg = "wifi_connect exec failed";
+		break;
+	default:
+		err_msg = "Unknown error";
+		break;
+	}
+
+	snprintf(response, response_len, "{\"err\":\"%s\"}", err_msg);
+}
+
+static int read_wifi_ip_response(char *response, size_t response_len)
+{
+	FILE *device_info_fp = fopen("/data/conf/device.json", "r");
+	if (!device_info_fp) {
+		snprintf(response, response_len, "{\"err\":\"Failed to read IP\"}");
+		return -1;
+	}
+
+	fseek(device_info_fp, 0, SEEK_END);
+	long file_size = ftell(device_info_fp);
+	fseek(device_info_fp, 0, SEEK_SET);
+
+	char *device_info_content = malloc(file_size + 1);
+	if (!device_info_content) {
+		fclose(device_info_fp);
+		snprintf(response, response_len, "{\"err\":\"Memory error\"}");
+		return -1;
+	}
+
+	fread(device_info_content, 1, file_size, device_info_fp);
+	device_info_content[file_size] = '\0';
+	fclose(device_info_fp);
+
+	cJSON *device_info = cJSON_Parse(device_info_content);
+	free(device_info_content);
+
+	if (!device_info) {
+		snprintf(response, response_len, "{\"err\":\"Invalid device_info\"}");
+		return -1;
+	}
+
+	cJSON *network = cJSON_GetObjectItem(device_info, "network");
+	cJSON *ip_item = network ? cJSON_GetObjectItem(network, "ip") : NULL;
+
+	if (!ip_item || !cJSON_IsString(ip_item)) {
+		snprintf(response, response_len, "{\"err\":\"IP not found\"}");
+		cJSON_Delete(device_info);
+		return -1;
+	}
+
+	char *ip = ip_item->valuestring;
+	if (!ip || strlen(ip) == 0) {
+		snprintf(response, response_len, "{\"err\":\"IP is empty\"}");
+		cJSON_Delete(device_info);
+		return -1;
+	}
+
+	snprintf(response, response_len, "{\"ip\":\"%s\"}", ip);
+
+	cJSON_Delete(device_info);
+	return 0;
+}
+
 static int process_wifi_config(const char *json_str, char *response, size_t response_len)
 {
 	cJSON *root = cJSON_Parse(json_str);
@@ -159,111 +271,38 @@ static int process_wifi_config(const char *json_str, char *response, size_t resp
 
 	char *ssid = ssid_item->valuestring;
 	cJSON *password_item = cJSON_GetObjectItem(root, "pw");
-	char *password = NULL;
+	const char *password = "";
 	if (password_item && cJSON_IsString(password_item)) {
 		password = password_item->valuestring;
 	}
 
-	char cmd[512];
-	snprintf(cmd, sizeof(cmd), "/usr/share/thirdreality/script/wifi_connect connect '%s' '%s'", ssid, password);
-
-	int exit_status = system(cmd);
-	int exit_code = WEXITSTATUS(exit_status);
+	int exit_code = run_wifi_connect_command(ssid, password);
 
 	if (exit_code != 0) {
-		const char *err_msg;
-		switch (exit_code) {
-		case 10:
-			err_msg = "SSID not found";
-			break;
-		case 12:
-			err_msg = "Failed to get IP";
-			break;
-		case 13:
-			err_msg = "Connect failed";
-			break;
-		case 14:
-			err_msg = "Switch WiFi failed";
-			break;
-		default:
-			err_msg = "Unknown error";
-			break;
-		}
-
-		snprintf(response, response_len, "{\"err\":\"%s\"}", err_msg);
+		format_wifi_error_response(exit_code, response, response_len);
 		cJSON_Delete(root);
 		return -1;
 	}
 
-	FILE *device_info_fp = fopen("/data/conf/device.json", "r");
-	if (!device_info_fp) {
-		snprintf(response, response_len, "{\"err\":\"Failed to read IP\"}");
+	if (read_wifi_ip_response(response, response_len) != 0) {
 		cJSON_Delete(root);
 		return -1;
 	}
-
-	fseek(device_info_fp, 0, SEEK_END);
-	long file_size = ftell(device_info_fp);
-	fseek(device_info_fp, 0, SEEK_SET);
-
-	char *device_info_content = malloc(file_size + 1);
-	if (!device_info_content) {
-		fclose(device_info_fp);
-		snprintf(response, response_len, "{\"err\":\"Memory error\"}");
-		cJSON_Delete(root);
-		return -1;
-	}
-
-	fread(device_info_content, 1, file_size, device_info_fp);
-	device_info_content[file_size] = '\0';
-	fclose(device_info_fp);
-
-	cJSON *device_info = cJSON_Parse(device_info_content);
-	free(device_info_content);
-
-	if (!device_info) {
-		snprintf(response, response_len, "{\"err\":\"Invalid device_info\"}");
-		cJSON_Delete(root);
-		return -1;
-	}
-
-	cJSON *network = cJSON_GetObjectItem(device_info, "network");
-	cJSON *ip_item = network ? cJSON_GetObjectItem(network, "ip") : NULL;
-
-	if (!ip_item || !cJSON_IsString(ip_item)) {
-		snprintf(response, response_len, "{\"err\":\"IP not found\"}");
-		cJSON_Delete(device_info);
-		cJSON_Delete(root);
-		return -1;
-	}
-
-	char *ip = ip_item->valuestring;
-	if (!ip || strlen(ip) == 0) {
-		snprintf(response, response_len, "{\"err\":\"IP is empty\"}");
-		cJSON_Delete(device_info);
-		cJSON_Delete(root);
-		return -1;
-	}
-
-	snprintf(response, response_len, "{\"ip\":\"%s\"}", ip);
-
-	cJSON_Delete(device_info);
 	cJSON_Delete(root);
 	return 0;
 }
 
 static int process_wifi_config_improv(const char *ssid, const char *pw, char *out_ip, size_t out_ip_len)
 {
-	char json[512];
-	if (pw && strlen(pw) > 0) {
-		snprintf(json, sizeof(json), "{\"ssid\":\"%s\",\"pw\":\"%s\"}", ssid, pw);
-	} else {
-		snprintf(json, sizeof(json), "{\"ssid\":\"%s\",\"pw\":\"\"}", ssid);
+	char response[256];
+	int exit_code = run_wifi_connect_command(ssid, pw);
+
+	if (exit_code != 0) {
+		format_wifi_error_response(exit_code, response, sizeof(response));
+		return -1;
 	}
 
-	char response[256];
-	int rc = process_wifi_config(json, response, sizeof(response));
-	if (rc != 0) {
+	if (read_wifi_ip_response(response, sizeof(response)) != 0) {
 		return -1;
 	}
 

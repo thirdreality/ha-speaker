@@ -1,9 +1,75 @@
 #!/bin/sh
 
 DEVICE_INFO="/data/conf/device.json"
-DEVICE_INFO_TMP="/tmp/tmp.json"
+DEVICE_INFO_TMP="/tmp/device_info.wifi.tmp.json"
+DEVICE_INFO_LOCK="/tmp/device_info.lock"
 
 switch_wifi=0
+
+get_scan_flags()
+{
+    local ssid="$1"
+
+    wpa_cli -i wlan0 scan_results | awk -F '\t' -v target_ssid="$ssid" '
+        NR > 1 && $5 == target_ssid {
+            print $4
+            exit
+        }
+    '
+}
+
+scan_result_exists()
+{
+    local ssid="$1"
+
+    wpa_cli -i wlan0 scan_results | awk -F '\t' -v target_ssid="$ssid" '
+        NR > 1 && $5 == target_ssid {
+            found = 1
+            exit
+        }
+        END {
+            exit(found ? 0 : 1)
+        }
+    '
+}
+
+get_network_id_by_ssid()
+{
+    local ssid="$1"
+
+    wpa_cli -i wlan0 list_networks | awk -F '\t' -v target_ssid="$ssid" '
+        NR > 1 && $2 == target_ssid {
+            print $1
+            exit
+        }
+    '
+}
+
+get_valid_ipv4_address()
+{
+    ip -o -4 addr show dev wlan0 scope global 2>/dev/null | awk '{print $4}' | cut -d'/' -f1 | head -1
+}
+
+get_link_local_ipv4_address()
+{
+    ip -o -4 addr show dev wlan0 scope link 2>/dev/null | awk '{print $4}' | cut -d'/' -f1 | head -1
+}
+
+update_network_info()
+{
+    local status="$1"
+    local ssid="$2"
+    local ip="$3"
+
+    (
+        flock -x 9
+        jq --arg status "$status" --arg ssid "$ssid" --arg ip "$ip" '
+            .network.status = $status
+            | .network.ssid = $ssid
+            | .network.ip = $ip
+        ' "$DEVICE_INFO" > "$DEVICE_INFO_TMP" && mv "$DEVICE_INFO_TMP" "$DEVICE_INFO"
+    ) 9>"$DEVICE_INFO_LOCK"
+}
 
 clean_config()
 {
@@ -33,7 +99,7 @@ detect_wifi_type()
     local ssid="$1"
     local flags=""
 
-    flags=$(wpa_cli -i wlan0 scan_results | grep "$ssid" | head -1 | awk '{print $4}')
+    flags=$(get_scan_flags "$ssid")
 
     if [ -z "$flags" ]; then
         echo "unknown"
@@ -123,14 +189,13 @@ wifi_connect()
 wifi_disconnect()
 {
     local ssid=$(wpa_cli -i wlan0 status | grep -E '^ssid=' | awk -F "=" '{print $2}')
-    local network_id=$(wpa_cli -i wlan0 list_networks | grep -w "$ssid" | awk '{print $1}')
+    local network_id=$(get_network_id_by_ssid "$ssid")
 
     echo "Disconnect ${ssid}"
     echo "$network_id" > /tmp/old_wifi_id
     echo "$ssid" > /tmp/old_wifi_ssid
 
     wpa_cli -i wlan0 disconnect
-    /etc/init.d/S41dhcpcd restart
 }
 
 wifi_reconnect()
@@ -190,31 +255,35 @@ wifi_reconnect()
     fi
 }
 
+restart_dhcp_client()
+{
+    echo "Restarting DHCP client on wlan0..."
+    /etc/init.d/S41dhcpcd restart
+}
+
 wifi_connect_success()
 {
     local ssid=$(wpa_cli status | awk -F= '/^ssid/ {print $2}')
     local ip=""
+    local link_local_ip=""
     local max_retries=15
     local retry_count=0
 
+    restart_dhcp_client
+
     while [ $retry_count -lt $max_retries ]; do
-        ip=$(ip -4 addr show wlan0 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d'/' -f1 | head -1)
+        ip=$(get_valid_ipv4_address)
 
         if [ -n "$ip" ]; then
-            case "$ip" in
-                169.254.*)
-                    echo "Link-local address: $ip, waiting for DHCP... ($((retry_count + 1))/$max_retries)"
-                    ;;
-                127.0.0.1)
-                    echo "Loopback address detected, waiting... ($((retry_count + 1))/$max_retries)"
-                    ;;
-                *)
-                    echo "Valid IP address obtained: $ip"
-                    break
-                    ;;
-            esac
+            echo "Valid IP address obtained: $ip"
+            break
         else
-            echo "No IP address yet, waiting... ($((retry_count + 1))/$max_retries)"
+            link_local_ip=$(get_link_local_ipv4_address)
+            if [ -n "$link_local_ip" ]; then
+                echo "Link-local address: $link_local_ip, waiting for DHCP... ($((retry_count + 1))/$max_retries)"
+            else
+                echo "No IP address yet, waiting... ($((retry_count + 1))/$max_retries)"
+            fi
         fi
 
         retry_count=$((retry_count + 1))
@@ -223,36 +292,15 @@ wifi_connect_success()
 
     if [ -z "$ip" ]; then
         echo "ERROR: Failed to obtain IP address after $max_retries attempts"
+        update_network_info "disconnected" "" ""
         clean_config
         sync
         exit 12
     fi
 
-    case "$ip" in
-        169.254.*)
-            echo "ERROR: Only link-local address available: $ip"
-            clean_config
-            sync
-            exit 12
-            ;;
-        127.0.0.1)
-            echo "ERROR: Invalid loopback address"
-            clean_config
-            sync
-            exit 12
-            ;;
-    esac
-
     echo "Connection successful - SSID: $ssid, IP: $ip"
 
-    (
-        flock -x 200
-        jq '.network += {
-            "ssid": "'"$ssid"'",
-            "ip": "'"$ip"'",
-            "status": "connected"
-        }' "$DEVICE_INFO" > "$DEVICE_INFO_TMP" && mv "$DEVICE_INFO_TMP" "$DEVICE_INFO"
-    ) 200>/tmp/device_info.lock
+    update_network_info "connected" "$ssid" "$ip"
 
     clean_config
     sync
@@ -264,9 +312,11 @@ wifi_connect_failed()
     if [ $switch_wifi -eq 1 ]; then
         switch_wifi=0
         wifi_reconnect
+        update_network_info "disconnected" "" ""
         sync
         exit 14
     else
+        update_network_info "disconnected" "" ""
         clean_config
         sync
         exit 13
@@ -281,8 +331,9 @@ wifi()
 
     wpa_cli scan > /dev/null
     sleep 2
-    wpa_cli scan_results | grep -q "$ssid" || {
+    scan_result_exists "$ssid" || {
         echo "SSID not found: $ssid"
+        update_network_info "disconnected" "" ""
         sync
         exit 10
     }

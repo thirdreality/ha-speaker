@@ -29,8 +29,8 @@ if [ -x $NTPDATE_BIN ] ; then
                 paplay /usr/share/thirdreality/audio/ready_to_connect_ha.wav &
             fi
             /etc/init.d/S44bluetooth stop
-            /usr/share/thirdreality/script/voice-assistant start
-            /usr/share/thirdreality/script/music-assistant start
+            /etc/init.d/S99ha-speaker voice-assistant start
+            /etc/init.d/S99ha-speaker snapclient start
 
             /bin/date +%Y-%m-%d > /etc/last_date
             #If the platform have RTC, we will write back to RTC HW
