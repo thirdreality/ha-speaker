@@ -9,7 +9,6 @@ PYOPEN_WAKEWORD_SITE = $(TOPDIR)/package/thirdreality/pyopen-wakeword/src
 PYOPEN_WAKEWORD_SITE_METHOD = local
 
 PYOPEN_WAKEWORD_SETUP_TYPE = setuptools
-# PYOPEN_WAKEWORD_DEPENDENCIES = python-wyoming host-python-wheel
 
 define PYOPEN_WAKEWORD_INSTALL_SO_LIBS
 	$(INSTALL) -D -m 0755 $(@D)/lib/trspk/libtensorflowlite_c.so \
