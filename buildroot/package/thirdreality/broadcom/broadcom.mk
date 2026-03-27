@@ -20,7 +20,7 @@ endef
 
 define BROADCOM_INSTALL_TARGET_CMDS
 	mkdir -p $(TARGET_DIR)/etc/wifi/6212
-	$(INSTALL) -D -m 0644 $(@D)/config/6212/config.txt $(TARGET_DIR)/etc/wifi/6212/config.txt
+	$(INSTALL) -D -m 0644 $(@D)/config/6212/config.txt $(TARGET_DIR)/etc/wifi/6212/config_bcm43438a1.txt
 	$(INSTALL) -D -m 0644 $(@D)/config/6212/fw_bcm43438a0.bin $(TARGET_DIR)/etc/wifi/6212/fw_bcm43438a0.bin
 	$(INSTALL) -D -m 0644 $(@D)/config/6212/fw_bcm43438a0_apsta.bin $(TARGET_DIR)/etc/wifi/6212/fw_bcm43438a0_apsta.bin
 	$(INSTALL) -D -m 0644 $(@D)/config/6212/fw_bcm43438a0_p2p.bin $(TARGET_DIR)/etc/wifi/6212/fw_bcm43438a0_p2p.bin

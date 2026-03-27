@@ -1,4 +1,16 @@
 bcn_timeout=20
 kso_enable=0
+# Regulatory: CN=38(China) / US=0(FCC North America) / EU=0(ETSI Europe)
 ccode=CN
 regrev=38
+# Power management: must use uppercase PM= (driver is case-sensitive)
+PM=0
+# Frame bursting: allows back-to-back frames without DIFS gap, +20~30% throughput
+frameburst=1
+# Keepalive interval in ms (default 30000); lower value prevents idle disconnection
+keep_alive_period=10000
+# Disable roaming scan (stationary IoT device, avoids scan-induced latency)
+roam_off=1
+# Country auto-mapping list: AP_ccode:regulatory_ccode/regrev
+# ** is a wildcard fallback for any unmatched country code
+country_list=CN:CN/38, US:US/0, GB:GB/0, DE:DE/0, FR:FR/0, AU:AU/0, **:US/0
