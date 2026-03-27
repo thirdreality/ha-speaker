@@ -93,9 +93,9 @@ struct server {
 	struct gatt_db *db;
 	struct bt_gatt_server *gatt;
 
-	bool notifying;
-	bool notification_ready;
-	bool notify_confirm;
+	bool state_notify_enabled;
+	bool error_notify_enabled;
+	bool result_notify_enabled;
 	pthread_mutex_t notification_lock;
 
 	// BLE GATT long write buffer for RPC
@@ -141,6 +141,22 @@ static void delayed_exit_cb(int timeout_id, void *user_data)
 	(void)user_data;
 	should_exit = true;
 	mainloop_quit();
+}
+
+static void delayed_session_reset_cb(int timeout_id, void *user_data)
+{
+	(void)timeout_id;
+	(void)user_data;
+	mainloop_quit();
+}
+
+static void reset_improv_session_state(void)
+{
+	if (wifi_config_completed)
+		return;
+
+	improv_state = 0x02; /* Authorized */
+	improv_error = 0x00; /* No error */
 }
 
 static int run_wifi_connect_command(const char *ssid, const char *password)
@@ -329,11 +345,8 @@ static void att_disconnect_cb(int err, void *user_data)
 	printf("[BLE] Client disconnected (err=%d)\n", err);
 	client_connected = false;
 
-	/* Reset error state on disconnect so next client doesn't see stale error */
-	if (!wifi_config_completed) {
-		improv_state = 0x02; // Back to Authorized
-		improv_error = 0x00; // Clear error
-	}
+	/* Reset state so the next BLE session starts clean. */
+	reset_improv_session_state();
 
 	if (wifi_config_completed) {
 		should_exit = true;
@@ -362,7 +375,7 @@ static void send_notification_raw(struct server *server, const uint8_t *data, si
 	while (offset < len) {
 		size_t chunk = (len - offset > max_payload) ? max_payload : (len - offset);
 		bool result = bt_gatt_server_send_notification(server->gatt, char_handle, data + offset, chunk,
-							 server->notify_confirm);
+								 false);
 		if (!result) {
 			printf("[TX] notification failed at offset=%zu\n", offset);
 			break;
@@ -372,6 +385,20 @@ static void send_notification_raw(struct server *server, const uint8_t *data, si
 			usleep(50000);
 		}
 	}
+}
+
+static bool is_notify_enabled_for_handle(const struct server *server, uint16_t char_handle)
+{
+	if (char_handle == improv_chars.state_value_handle)
+		return server->state_notify_enabled;
+
+	if (char_handle == improv_chars.error_value_handle)
+		return server->error_notify_enabled;
+
+	if (char_handle == improv_chars.result_handle)
+		return server->result_notify_enabled;
+
+	return false;
 }
 
 static void dump_hex(const char *tag, const uint8_t *buf, size_t len)
@@ -458,7 +485,7 @@ static void improv_send_result(struct server *server, uint8_t cmd, const char **
 	out[idx++] = checksum8(out, idx);
 
 	pthread_mutex_lock(&server->notification_lock);
-	if (server->notifying && client_connected) {
+	if (is_notify_enabled_for_handle(server, improv_chars.result_handle) && client_connected) {
 		send_notification_raw(server, out, idx, improv_chars.result_handle);
 	}
 	pthread_mutex_unlock(&server->notification_lock);
@@ -472,10 +499,11 @@ static void improv_notify_state(struct server *server)
 	improv_update_adv_state();
 	uint8_t val = improv_state;
 	pthread_mutex_lock(&server->notification_lock);
-	if (server->notifying && client_connected) {
+	if (is_notify_enabled_for_handle(server, improv_chars.state_value_handle) && client_connected) {
 		send_notification_raw(server, &val, 1, improv_chars.state_value_handle);
 	} else {
-		printf("[TX] state notify skipped (notifying=%d connected=%d)\n", server->notifying, client_connected);
+		printf("[TX] state notify skipped (enabled=%d connected=%d)\n",
+		       server->state_notify_enabled, client_connected);
 	}
 	pthread_mutex_unlock(&server->notification_lock);
 }
@@ -488,10 +516,11 @@ static void improv_notify_error(struct server *server)
 	printf("[TX] Notify error -> %s\n", e);
 	uint8_t val = improv_error;
 	pthread_mutex_lock(&server->notification_lock);
-	if (server->notifying && client_connected) {
+	if (is_notify_enabled_for_handle(server, improv_chars.error_value_handle) && client_connected) {
 		send_notification_raw(server, &val, 1, improv_chars.error_value_handle);
 	} else {
-		printf("[TX] error notify skipped (notifying=%d connected=%d)\n", server->notifying, client_connected);
+		printf("[TX] error notify skipped (enabled=%d connected=%d)\n",
+		       server->error_notify_enabled, client_connected);
 	}
 	pthread_mutex_unlock(&server->notification_lock);
 }
@@ -615,18 +644,21 @@ static void improv_handle_rpc_packet(struct server *server, const uint8_t *value
 
 		wifi_config_completed = true;
 		mainloop_add_timeout(2000, delayed_exit_cb, NULL, NULL);
-	} else {
-		printf("[WiFi] Connection failed for SSID='%s'\n", ssid_buf);
-		improv_state = 0x02; // Authorized
-		improv_error = 0x03; // Unable to connect
-		improv_notify_state(server);
+		} else {
+			printf("[WiFi] Connection failed for SSID='%s'\n", ssid_buf);
+			improv_state = 0x02; // Authorized
+			improv_error = 0x03; // Unable to connect
+			improv_notify_state(server);
 		improv_notify_error(server);
 
-		printf("[TX] RPC result: empty (failed)\n");
-		const char *result_strs[] = { "" };
-		improv_send_result(server, cmd, result_strs, 1);
+			printf("[TX] RPC result: empty (failed)\n");
+			const char *result_strs[] = { "" };
+			improv_send_result(server, cmd, result_strs, 1);
+
+			/* End this BLE session after reporting failure so the client can reconnect cleanly. */
+			mainloop_add_timeout(500, delayed_session_reset_cb, NULL, NULL);
+		}
 	}
-}
 
 static void improv_write_rpc_cb(struct gatt_db_attribute *attrib, unsigned int id, uint16_t offset, const uint8_t *value,
 				size_t len, uint8_t opcode, struct bt_att *att, void *user_data)
@@ -734,10 +766,18 @@ static void cccd_read_cb(struct gatt_db_attribute *attrib, unsigned int id, uint
 {
 	struct server *server = user_data;
 	uint8_t value[2] = { 0, 0 };
+	uint16_t cccd_handle = gatt_db_attribute_get_handle(attrib);
 
-	if (server->notifying) {
+	pthread_mutex_lock(&server->notification_lock);
+
+	if (cccd_handle == improv_chars.state_value_handle + 1 && server->state_notify_enabled)
 		value[0] = 0x01;
-	}
+	else if (cccd_handle == improv_chars.error_value_handle + 1 && server->error_notify_enabled)
+		value[0] = 0x01;
+	else if (cccd_handle == improv_chars.result_handle + 1 && server->result_notify_enabled)
+		value[0] = 0x01;
+
+	pthread_mutex_unlock(&server->notification_lock);
 
 	gatt_db_attribute_read_result(attrib, id, 0, value, 2);
 }
@@ -746,6 +786,7 @@ static void cccd_write_cb(struct gatt_db_attribute *attrib, unsigned int id, uin
 			  uint8_t opcode, struct bt_att *att, void *user_data)
 {
 	uint16_t cccd_handle = gatt_db_attribute_get_handle(attrib);
+	bool enabled;
 	struct server *server = user_data;
 
 	if (len != 2) {
@@ -758,48 +799,26 @@ static void cccd_write_cb(struct gatt_db_attribute *attrib, unsigned int id, uin
 	printf("[RX] CCCD write handle=0x%04X value=0x%04X (%s)\n", cccd_handle, cccd_value,
 	       (cccd_value & 0x01) ? "Notify" : (cccd_value & 0x02) ? "Indicate" : "Disabled");
 
+	enabled = !!(cccd_value & 0x03);
+
 	pthread_mutex_lock(&server->notification_lock);
 
-	if (cccd_value & 0x01) {
-		server->notifying = true;
-		server->notification_ready = true;
-		server->notify_confirm = false;
-	} else if (cccd_value & 0x02) {
-		server->notifying = true;
-		server->notification_ready = true;
-		server->notify_confirm = true;
-	} else {
-		server->notifying = false;
-		server->notification_ready = false;
-		server->notify_confirm = false;
-	}
+	if (cccd_handle == improv_chars.state_value_handle + 1)
+		server->state_notify_enabled = enabled;
+	else if (cccd_handle == improv_chars.error_value_handle + 1)
+		server->error_notify_enabled = enabled;
+	else if (cccd_handle == improv_chars.result_handle + 1)
+		server->result_notify_enabled = enabled;
 
 	pthread_mutex_unlock(&server->notification_lock);
 	gatt_db_attribute_write_result(attrib, id, 0);
 
-	/*
-	 * Check if this is an Improv CCCD (not GATT Service Changed CCCD).
-	 * We use a dynamic check: compare cccd_handle against the known Improv value handles.
-	 * The CCCD for a characteristic is typically at (value_handle + 1).
-	 * 
-	 * State CCCD: state_value_handle + 1
-	 * Error CCCD: error_value_handle + 1  
-	 * Result CCCD: result_handle + 1
-	 */
-	uint16_t state_cccd = improv_chars.state_value_handle + 1;
-	uint16_t error_cccd = improv_chars.error_value_handle + 1;
-	uint16_t result_cccd = improv_chars.result_handle + 1;
-	
-	bool is_improv_cccd = (cccd_handle == state_cccd || 
-	                       cccd_handle == error_cccd || 
-	                       cccd_handle == result_cccd);
-	
-	if (is_improv_cccd && client_connected && (cccd_value & 0x03)) {
-		/* Send state notification with a small delay */
+	if (client_connected && enabled) {
 		usleep(50000);
-		improv_notify_state(server);
-		usleep(100000);
-		improv_notify_error(server);
+		if (cccd_handle == improv_chars.state_value_handle + 1)
+			improv_notify_state(server);
+		else if (cccd_handle == improv_chars.error_value_handle + 1)
+			improv_notify_error(server);
 	}
 }
 
@@ -1034,8 +1053,9 @@ static struct server *server_create(int fd)
 		return NULL;
 	}
 
-	server->notifying = false;
-	server->notification_ready = false;
+	server->state_notify_enabled = false;
+	server->error_notify_enabled = false;
+	server->result_notify_enabled = false;
 	pthread_mutex_init(&server->notification_lock, NULL);
 
 	populate_gap_service(server);
@@ -1566,16 +1586,20 @@ int main(void)
 
 		mainloop_run_with_signal(signal_cb, NULL);
 
-		if (should_exit) {
-			break;
+		if (no_client_timeout_id > 0) {
+			mainloop_remove_timeout(no_client_timeout_id);
+			no_client_timeout_id = 0;
 		}
 
 		client_connected = false;
 		advertising = false;
+		reset_improv_session_state();
 
-		if (no_client_timeout_id > 0) {
-			mainloop_remove_timeout(no_client_timeout_id);
-			no_client_timeout_id = 0;
+		server_destroy(server);
+		server = NULL;
+
+		if (should_exit) {
+			break;
 		}
 
 		sleep(1);
@@ -1586,7 +1610,8 @@ int main(void)
 	}
 
 	stop_advertising();
-	server_destroy(server);
+	if (server)
+		server_destroy(server);
 
 	usleep(800000);
 	return EXIT_SUCCESS;
