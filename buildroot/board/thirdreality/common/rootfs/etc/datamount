@@ -5,6 +5,11 @@
 # defined in the file 'LICENSE' which is part of this source code package.
 # Description: data mount file
 #
+is_partition_migration_pending()
+{
+  uenv get partition_migration 2>/dev/null | grep -q 'value:\[128_to_200\]'
+}
+
 data_ubi_handle()
 {
   #get current platform
@@ -19,7 +24,9 @@ data_ubi_handle()
     data_mtd_number=$(cat /proc/mtd | grep  -E "data" | awk -F : '{print $1}' | grep -o '[0-9]\+')
   fi
 
-  if ! uenv get factory-reset | grep -q 'value:\[1\]'; then
+  if is_partition_migration_pending; then
+    echo "partition migration pending, recreate data partition"
+  elif ! uenv get factory-reset | grep -q 'value:\[1\]'; then
     mount | grep 'data' && echo "Already mounted" && return 0
     #mount dir create
     if [ ! -d "/data" ]
@@ -55,6 +62,10 @@ data_ubi_handle()
   #    ubimkvol /dev/ubi1 -s $dataSize"MiB" -N data
   ubimkvol /dev/ubi1 -m -N data
   mount -t ubifs /dev/ubi1_0 /data
+
+  if is_partition_migration_pending; then
+    uenv set partition_migration done
+  fi
 }
 
 data_ext4_handle()

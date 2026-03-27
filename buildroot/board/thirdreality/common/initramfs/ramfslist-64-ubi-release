@@ -258,6 +258,8 @@
 ./usr/bin/lsusb
 ./usr/bin/tr
 ./usr/bin/traceroute
+./usr/bin/uenv
+./usr/lib/libubootenv.so
 ./usr/lib64
 ./usr/sbin
 ./usr/sbin/ether-wake
@@ -283,9 +285,11 @@
 ./usr/sbin/crond
 ./usr/sbin/ubiattach
 ./usr/sbin/ubidetach
+./usr/sbin/flash_erase
 ./usr/sbin/ubiformat
 ./usr/sbin/ubinfo
 ./usr/sbin/ubimkvol
+./usr/sbin/ubirsvol
 ./lib64
 ./proc
 ./dev

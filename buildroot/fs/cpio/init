@@ -177,6 +177,74 @@ dm_verity_setup() {
     fi
 }
 
+get_mtd_size_bytes() {
+    part_name="$1"
+    size_hex=$(awk -v label="\""${part_name}"\"" '$0 ~ label { print $2; exit }' /proc/mtd)
+
+    if [ -n "${size_hex}" ]; then
+        echo $((0x${size_hex}))
+    fi
+}
+
+system_partition_is_expanded() {
+    old_system_bytes=$((128 * 1024 * 1024))
+    system_size_bytes=$(get_mtd_size_bytes system)
+
+    [ -n "${system_size_bytes}" ] && [ "${system_size_bytes}" -gt "${old_system_bytes}" ]
+}
+
+clear_expanded_system_tail() {
+    old_system_bytes=$((128 * 1024 * 1024))
+    if ! system_partition_is_expanded; then
+        return 1
+    fi
+
+    if [ ! -x /usr/sbin/flash_erase ]; then
+        echo "flash_erase is unavailable, cannot recover expanded system partition"
+        return 1
+    fi
+
+    echo "partition migration pending, erase expanded system tail from ${old_system_bytes} bytes"
+    ubidetach /dev/ubi_ctrl -m "${system_mtd_number}" >/dev/null 2>&1
+    /usr/sbin/flash_erase "/dev/mtd${system_mtd_number}" "${old_system_bytes}" 0
+}
+
+expand_rootfs_volume_if_needed() {
+    if ! system_partition_is_expanded; then
+        return 0
+    fi
+
+    if [ ! -x /usr/sbin/ubirsvol ]; then
+        echo "ubirsvol is unavailable, skip rootfs volume expansion"
+        return 0
+    fi
+
+    rootfs_sysfs=""
+    for vol in /sys/class/ubi/ubi0_*; do
+        [ -f "${vol}/name" ] || continue
+        if [ "$(cat "${vol}/name")" = "rootfs" ]; then
+            rootfs_sysfs="${vol}"
+            break
+        fi
+    done
+
+    if [ -z "${rootfs_sysfs}" ]; then
+        echo "cannot locate rootfs UBI volume, skip expansion"
+        return 0
+    fi
+
+    avail_ebs=$(cat /sys/class/ubi/ubi0/avail_eraseblocks 2>/dev/null)
+    reserved_ebs=$(cat "${rootfs_sysfs}/reserved_ebs" 2>/dev/null)
+
+    if [ -z "${avail_ebs}" ] || [ -z "${reserved_ebs}" ] || [ "${avail_ebs}" -le 0 ]; then
+        return 0
+    fi
+
+    target_ebs=$((avail_ebs + reserved_ebs))
+    echo "resize rootfs volume from ${reserved_ebs} to ${target_ebs} LEBs"
+    /usr/sbin/ubirsvol /dev/ubi0 -N rootfs -S "${target_ebs}"
+}
+
 #Mount the root device
 #Waiting for device to become ready
 TimedOut=10000 #10*1000 milisecond
@@ -237,6 +305,17 @@ fi
 if [ "${rootfstype}" = "ubifs" ]; then
     echo "#[ubiattach /dev/ubi_ctrl -m ${system_mtd_number}]"
     ubiattach /dev/ubi_ctrl -m ${system_mtd_number}
+    attach_result=$?
+    if [ ${attach_result} -ne 0 ] && system_partition_is_expanded; then
+        echo "ubiattach failed on expanded system partition, try one-time recovery"
+        if clear_expanded_system_tail; then
+            ubiattach /dev/ubi_ctrl -m ${system_mtd_number}
+            attach_result=$?
+        fi
+    fi
+    if [ ${attach_result} -eq 0 ]; then
+        expand_rootfs_volume_if_needed
+    fi
     echo "#[ mount -t ubifs /dev/ubi0_0 /mnt ]"
     mount -t ${rootfstype} /dev/ubi0_0  /mnt
 elif [ "${rootfstype}" != "" ]; then
