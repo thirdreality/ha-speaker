@@ -178,28 +178,29 @@ We can create automation scripts based on the speaker's Home button trigger even
 
 ## Play Music
 
-We need to use Music Assistant to play music. (<https://www.home-assistant.io/integrations/music_assistant/>)
+We can use [Music Assistant](https://www.home-assistant.io/integrations/music_assistant/) to play music.
 
-**Settings → Add-ons** → search for and add **Music Assistant**
+**Settings → Add-ons** → search for and add **Music Assistant**. After adding it, you can access it via port 8095.
+
+If it doesn’t exist, please add it using [Music Assistant github repository](https://github.com/music-assistant/home-assistant-addon.git)
 
 <div align="left">
   <img src="doc/images/music-1.png" width="30%">
 </div>
 
-Go to the Music Assistant: **Settings → Add Player Provider → Add Snapcast**.
+Go to the Music Assistant: **Settings → Providers → Add a new provider**. Search for Snapcast and add it.
 
 <div align="left">
   <img src="doc/images/music-2.png" width="30%">
   <img src="doc/images/music-3.png" width="30%">
 </div>
 
-**Settings → Add Music Provider** → Add any playback source of your choice. Steps to add Spotify: <https://www.music-assistant.io/music-providers/spotify/>
+Then you can follow the same steps to add Spotify or any other supported music playback source.
 
-You can see your speaker in the device list, select it to start playback.
+Finally, select a song and the speaker, and you can start playback! 🎵
 
 <div align="left">
   <img src="doc/images/music-4.png" width="30%">
-  <img src="doc/images/music-5.png" width="30%">
 </div>
 
 ---
@@ -207,8 +208,8 @@ You can see your speaker in the device list, select it to start playback.
 ## Multi-Room Music
 
 <div align="left">
+  <img src="doc/images/music-5.png" width="30%">
   <img src="doc/images/music-6.png" width="30%">
-  <img src="doc/images/music-7.png" width="30%">
 </div>
 
 ---
