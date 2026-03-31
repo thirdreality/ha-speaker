@@ -99,10 +99,6 @@ software =
 		{
 			name = "upgrade_step";
 			value = "1";
-		},
-		{
-			name = "partition_migration";
-			value = "128_to_200";
 		}
 	);
 }
