@@ -1,6 +1,9 @@
 config BR2_PACKAGE_PYTHON_PYMICRO_WAKEWORD
 	bool "python-pymicro-wakeword"
 	depends on BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_PYTHON_PYMICRO_FEATURES
+	select BR2_PACKAGE_PYTHON_NUMPY
 	help
-	  Python library for microWakeWord models.
+	  Micro wake word detection engine for voice assistants.
+
 	  https://github.com/OHF-Voice/pymicro-wakeword

@@ -2,6 +2,11 @@
 #
 # pyopen-wakeword
 #
+# Open wake word detection engine.
+#
+# Runtime dependencies (from pyproject.toml):
+#   numpy  - Array processing
+#
 ################################################################################
 
 PYOPEN_WAKEWORD_VERSION = v1.1.0
@@ -9,6 +14,7 @@ PYOPEN_WAKEWORD_SITE = $(TOPDIR)/package/thirdreality/pyopen-wakeword/src
 PYOPEN_WAKEWORD_SITE_METHOD = local
 
 PYOPEN_WAKEWORD_SETUP_TYPE = setuptools
+PYOPEN_WAKEWORD_DEPENDENCIES = python-numpy
 
 define PYOPEN_WAKEWORD_INSTALL_SO_LIBS
 	$(INSTALL) -D -m 0755 $(@D)/lib/trspk/libtensorflowlite_c.so \

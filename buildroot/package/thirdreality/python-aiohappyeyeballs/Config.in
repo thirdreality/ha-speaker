@@ -1,6 +1,7 @@
 config BR2_PACKAGE_PYTHON_AIOHAPPYEYEBALLS
 	bool "python-aiohappyeyeballs"
+	depends on BR2_PACKAGE_PYTHON3
 	help
-	  Happy Eyeballs for asyncio.
+	  Happy Eyeballs connection algorithm for asyncio.
 
 	  https://github.com/aio-libs/aiohappyeyeballs

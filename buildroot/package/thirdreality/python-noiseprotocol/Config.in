@@ -1,7 +1,8 @@
 config BR2_PACKAGE_PYTHON_NOISEPROTOCOL
 	bool "python-noiseprotocol"
+	depends on BR2_PACKAGE_PYTHON3
 	select BR2_PACKAGE_PYTHON_CRYPTOGRAPHY
 	help
-	  Implementation of the Noise Protocol Framework.
+	  Noise Protocol Framework implementation for Python.
 
 	  https://github.com/plizonczyk/noiseprotocol

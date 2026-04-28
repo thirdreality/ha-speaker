@@ -1,5 +1,6 @@
 config BR2_PACKAGE_PYTHON_ASYNC_INTERRUPT
 	bool "python-async-interrupt"
+	depends on BR2_PACKAGE_PYTHON3
 	help
 	  Context manager to raise an exception when a future is done.
 

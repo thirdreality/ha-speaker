@@ -1,5 +1,8 @@
 config BR2_PACKAGE_PYOPEN_WAKEWORD
 	bool "pyopen-wakeword"
-    default n
+	depends on BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_PYTHON_NUMPY
 	help
-        https://github.com/rhasspy/pyopen-wakeword
+	  Open wake word detection engine for voice assistants.
+
+	  https://github.com/OHF-Voice/pyopen-wakeword

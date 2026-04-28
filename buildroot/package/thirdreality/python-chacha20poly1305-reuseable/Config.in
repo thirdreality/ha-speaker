@@ -1,7 +1,8 @@
 config BR2_PACKAGE_PYTHON_CHACHA20POLY1305_REUSEABLE
 	bool "python-chacha20poly1305-reuseable"
+	depends on BR2_PACKAGE_PYTHON3
 	select BR2_PACKAGE_PYTHON_CRYPTOGRAPHY
 	help
-	  ChaCha20Poly1305 that is reuseable for asyncio.
+	  Reusable ChaCha20-Poly1305 AEAD cipher for Python.
 
 	  https://github.com/bdraco/chacha20poly1305-reuseable

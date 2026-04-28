@@ -1,4 +1,7 @@
 config BR2_PACKAGE_PYTHON_TZLOCAL
 	bool "python-tzlocal"
+	depends on BR2_PACKAGE_PYTHON3
 	help
+	  Local timezone detection for Python.
+
 	  https://github.com/regebro/tzlocal

@@ -1,7 +1,8 @@
 config BR2_PACKAGE_PYTHON_SOUNDCARD
 	bool "python-soundcard"
 	depends on BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_PYTHON_CFFI
 	help
-	  Pure Python cross-platform audio I/O library.
-	  
+	  Pure-Python real-time audio library using CFFI.
+
 	  https://github.com/bastibe/SoundCard

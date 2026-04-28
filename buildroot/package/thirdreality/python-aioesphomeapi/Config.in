@@ -1,7 +1,16 @@
 config BR2_PACKAGE_PYTHON_AIOESPHOMEAPI
 	bool "python-aioesphomeapi"
 	depends on BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_PYTHON_AIOHAPPYEYEBALLS
+	select BR2_PACKAGE_PYTHON_ASYNC_INTERRUPT
+	select BR2_PACKAGE_PYTHON_PROTOBUF
+	select BR2_PACKAGE_PYTHON_TZLOCAL
+	select BR2_PACKAGE_PYTHON_ZEROCONF
+	select BR2_PACKAGE_PYTHON_CHACHA20POLY1305_REUSEABLE
+	select BR2_PACKAGE_PYTHON_CRYPTOGRAPHY
+	select BR2_PACKAGE_PYTHON_NOISEPROTOCOL
 	help
-	  aioesphomeapi allows you to interact with devices flashed with ESPHome.
-	  
+	  aioesphomeapi allows you to interact with devices flashed
+	  with ESPHome using the native API.
+
 	  https://github.com/esphome/aioesphomeapi

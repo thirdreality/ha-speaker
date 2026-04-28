@@ -2,6 +2,12 @@
 #
 # python-pymicro-wakeword
 #
+# Micro wake word detection engine.
+#
+# Runtime dependencies (from pyproject.toml):
+#   pymicro-features  - Audio feature extraction (C++ extension)
+#   numpy             - Array processing
+#
 ################################################################################
 
 PYTHON_PYMICRO_WAKEWORD_VERSION = v2.1.0
@@ -16,6 +22,8 @@ endef
 PYTHON_PYMICRO_WAKEWORD_POST_INSTALL_TARGET_HOOKS += PYTHON_PYMICRO_WAKEWORD_INSTALL_SO_LIBS
 
 PYTHON_PYMICRO_WAKEWORD_SETUP_TYPE = setuptools
-PYTHON_PYMICRO_WAKEWORD_DEPENDENCIES = python-pymicro-features
+PYTHON_PYMICRO_WAKEWORD_DEPENDENCIES = \
+	python-pymicro-features \
+	python-numpy
 
 $(eval $(python-package))

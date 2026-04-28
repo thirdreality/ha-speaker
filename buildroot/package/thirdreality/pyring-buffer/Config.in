@@ -1,5 +1,7 @@
 config BR2_PACKAGE_PYRING_BUFFER
-	bool "pyring buffer"
-    default n
+	bool "pyring-buffer"
+	depends on BR2_PACKAGE_PYTHON3
 	help
-        https://github.com/rhasspy/pyring-buffer
+	  Ring buffer implementation for audio processing.
+
+	  https://github.com/rhasspy/pyring-buffer
