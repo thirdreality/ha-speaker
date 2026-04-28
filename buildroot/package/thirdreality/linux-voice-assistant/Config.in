@@ -1,6 +1,19 @@
 config BR2_PACKAGE_LINUX_VOICE_ASSISTANT
 	bool "linux voice assistant"
+	depends on BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_PYTHON_AIOESPHOMEAPI
 	select BR2_PACKAGE_PYTHON_NETIFACES_2
-    default n
+	select BR2_PACKAGE_PYTHON_SOUNDCARD
+	select BR2_PACKAGE_PYTHON_NUMPY
+	select BR2_PACKAGE_PYTHON_PYMICRO_WAKEWORD
+	select BR2_PACKAGE_PYOPEN_WAKEWORD
+	select BR2_PACKAGE_PYTHON_MPV
+	select BR2_PACKAGE_PYTHON_ZEROCONF
+	select BR2_PACKAGE_PYTHON_GETMAC
+	select BR2_PACKAGE_PYTHON_WEBRTC_NOISE_GAIN
+	default n
 	help
-        https://github.com/OHF-Voice/linux-voice-assistant
+	  Linux voice assistant for Home Assistant using the ESPHome protocol.
+	  Provides wake word detection, voice pipeline, and media playback.
+
+	  https://github.com/OHF-Voice/linux-voice-assistant

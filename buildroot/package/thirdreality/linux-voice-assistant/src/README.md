@@ -12,7 +12,7 @@ Because it runs on a full Linux system and offers access significantly more loca
 
 [![A project from the Open Home Foundation](https://www.openhomefoundation.org/badges/ohf-project.png)](https://www.openhomefoundation.org/)
 
-## Features:
+## Features
 
 - Works with [Home Assistant](https://www.home-assistant.io/integrations/esphome/) using the [ESPHome](https://esphome.io/) protocol/API (via [aioesphomeapi](https://github.com/esphome/aioesphomeapi))
 - Feature local on-device wake word detection using integrated [OpenWakeWord](https://github.com/dscripka/openWakeWord) or [MicroWakeWord](https://github.com/kahrendt/microWakeWord)
@@ -20,39 +20,38 @@ Because it runs on a full Linux system and offers access significantly more loca
 - Supports multiple architectures (linux/amd64 and linux/aarch64)
 - Automated builds with artifact attestation for security
 - Supports announcments, start/continue conversation, and timers
-- Tested with Python 3.13 and Python 3.11.
+- Tested and works with Python 3.11 and Python 3.12.
 - Prebuild docker image available on [GitHub Container Registry](https://github.com/OHF-Voice/linux-voice-assistant/pkgs/container/linux-voice-assistant)
-- Prebuild Raspberry Pi image
+- Prebuild [Raspberry Pi image](https://github.com/florian-asche/PiCompose)
 
+## Usage
 
-## Usage:
-
-### Hardware:
+### Hardware
 
 A more extensive list for possible compatible hardware can be found in the [PiCompose documentation](https://github.com/florian-asche/PiCompose) but basically any microphone that works with [PipeWire (multimedia framework for Linux)](https://pipewire.org/) can in theory be used for voice input with the prebuild image from there, you should however preferably use a far-field microphone-array solution if want better result. 
 
 Two solutions recommended for test setups today is to use a Raspberry Pi Zero 2 W SBC (Single Board Computer with built-in WiFi) in combination with the [Satellite1 Hat Board](https://futureproofhomes.net/products/satellite1-top-microphone-board) or the [Respeaker Lite](https://wiki.seeedstudio.com/reSpeaker_usb_v3/). Those have microphone-array designed for far-field voice capture with the added benefit of using an onboard XMOS DSP microcontroller with custom firmware which does advanced audio pre-processing for microphone cleanup that result in very good voice recognition capabilities (as it runs algorithms for Noise Suppression, Acoustic Echo Cancellation, Interference Cancellation, and Automatic Gain Control). 
 
-Alternativly if on a lower budget then suggest could try other untested microphone-array boards like example the [reSpeaker 2-Mics Pi HAT V2.0](https://wiki.seeedstudio.com/ReSpeaker_2_Mics_Pi_HAT/) (which uses a much more basic audio codec chip).
+Alternatively if on a lower budget then suggest could try other untested microphone-array boards like example the [reSpeaker 2-Mics Pi HAT V2.0](https://wiki.seeedstudio.com/ReSpeaker_2_Mics_Pi_HAT/) (which uses a much more basic audio codec chip).
 
 As for the minimum required compute performance on these satellites the target reference hardware for testing is currently a 64-bit ARM-based SBC based on Raspberry Pi RP3A0 SiP (System-in-Package); which means the Raspberry Pi Zero 2 W, Raspberry Pi Compute Module 3E (Raspberry Pi CM3E), or other development boards that uses the Compute Module Zero" (Raspberry Pi CM0), as all of which have similar specifications to the Raspberry Pi 3 B/B+ but with a CPU running at a lower frequency.
 
 But you can also install LVA on AMD64 devices, for example on your Linux desktop computer.
 
-### Software:
+### Software
 
-#### Installation:
+#### Installation
 
 For Raspberry Pi users, we provide a prebuild image that can be flashed to a SD card. See [PiCompose](https://github.com/florian-asche/PiCompose).
 
-For all other users we have different installation methods available (Docker, systemd), each with its own dedicated instructions. See [Linux-Voice-Assistant - Installation](docs/install.md). 
+For all other users, we have different installation methods available (Docker, systemd), each with its own dedicated instructions. See [Linux-Voice-Assistant - Installation](docs/install.md). 
 
-#### Parameter overview:
+#### Parameter overview
 
-💡 **Note:** There is a [environment variable](docs/install_application.md#environment-variables-reference) for each parameter if you use docker or systemd based setup.
+💡 **Note:** There is an [environment variable](docs/install_application.md#environment-variables-reference) for each parameter if you use docker or systemd based setup.
 
 ``` sh
-usage: __main__.py [-h] [--name NAME] [--audio-input-device AUDIO_INPUT_DEVICE] [--list-input-devices] [--audio-input-block-size AUDIO_INPUT_BLOCK_SIZE] [--audio-output-device AUDIO_OUTPUT_DEVICE] [--list-output-devices] [--wake-word-dir WAKE_WORD_DIR]
+usage: __main__.py [-h] [--name NAME] [--audio-input-device AUDIO_INPUT_DEVICE] [--list-input-devices] [--audio-input-block-size AUDIO_INPUT_BLOCK_SIZE] [--audio-output-device AUDIO_OUTPUT_DEVICE] [--list-output-devices] [--wake-word-dir WAKE_WORD_DIR]  [--mic-auto-gain] [--mic-noise-suppression]
                    [--wake-model WAKE_MODEL] [--stop-model STOP_MODEL] [--download-dir DOWNLOAD_DIR] [--refractory-seconds REFRACTORY_SECONDS] [--wakeup-sound WAKEUP_SOUND] [--timer-finished-sound TIMER_FINISHED_SOUND] [--processing-sound PROCESSING_SOUND]
                    [--mute-sound MUTE_SOUND] [--unmute-sound UNMUTE_SOUND] [--preferences-file PREFERENCES_FILE] [--host HOST] [--network-interface NETWORK_INTERFACE] [--port PORT] [--enable-thinking-sound] [--debug]
 ```
@@ -63,11 +62,15 @@ usage: __main__.py [-h] [--name NAME] [--audio-input-device AUDIO_INPUT_DEVICE] 
 | `--audio-input-device` | Soundcard name for input device | Autodetected |
 | `--audio-input-block-size` | Audio input block size in samples | 1024 |
 | `--audio-output-device` | mpv name for output device | Autodetected |
+| `--mic-volume` | Control microphone volume | 1.0 |
+| `--mic-auto-gain` | Add WebRTC Gain to Mic | 0 |
+| `--mic-noise-suppression` | Add WebRTC Noise Suppression to Mic | 0 |
 | `--wake-word-dir` | Directory with wake word models (.tflite) and configs (.json) | `wakewords/` |
 | `--wake-model` | ID of active wake word model | `okay_nabu` |
 | `--stop-model` | ID of stop model | `stop` |
 | `--download-dir` | Directory to download custom wake word models, etc. | `local/` |
 | `--refractory-seconds` | Seconds before wake word can be activated again | 2.0 |
+| `--timer-max-ring-seconds` | Seconds after which the timer stops ringing | 900.0 |
 | `--wakeup-sound` | Sound file played when wake word is detected | `sounds/wake_word_triggered.flac` |
 | `--timer-finished-sound` | Sound file played when timer finishes | `sounds/timer_finished.flac` |
 | `--processing-sound` | Sound played while assistant is processing | `sounds/processing.wav` |
@@ -79,8 +82,12 @@ usage: __main__.py [-h] [--name NAME] [--audio-input-device AUDIO_INPUT_DEVICE] 
 | `--port` | Port for ESPHome server | 6053 |
 | `--enable-thinking-sound` | Enable thinking sound on startup | False |
 | `--debug` | Print DEBUG messages to console | False |
+| `--output-only` | Enable output only mode | False |
 
-## Build Information:
+💡 **Note:** There is a detailed explanation on the gain, noise suppression, and wake word sensitivity flags in the [audio options](docs/audio_options.md) file.
+
+
+## Build Information
 
 Image builds can be tracked in this repository's `Actions` tab, and utilize [artifact attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds) to certify provenance.
 
@@ -92,9 +99,9 @@ The Docker images are built using GitHub Actions, which provides:
 
 The documentation for the build process can be found in the [GitHub Actions Workflows](.github/workflow.md) file.
 
-## Development:
+## Development
 
-### Code Quality Checks:
+### Code Quality Checks
 
 The project uses the following tools to ensure code quality:
 - **Black**: Code formatting (88 characters per line, PEP 8 compliant)
@@ -103,7 +110,7 @@ The project uses the following tools to ensure code quality:
 - **pylint**: Code quality checks
 - **mypy**: Static type analysis
 
-### Setup:
+### Setup
 
 To use the development tools (linting, testing, etc.), you need to install the required dependencies:
 
@@ -112,14 +119,14 @@ To use the development tools (linting, testing, etc.), you need to install the r
 source .venv/bin/activate
 ```
 
-### Linting Commands:
+### Linting Commands
 
-#### Run all linting checks:
+#### Run all linting checks
 ``` sh
 ./script/lint...
 ```
 
-#### Individual linting commands (with auto-fix support):
+#### Individual linting commands (with auto-fix support)
 
 | Script | Description | Auto-fix Available? |
 |--------|-------------|---------------------|
@@ -129,7 +136,7 @@ source .venv/bin/activate
 | `./script/lint_mypy` | Runs static type analysis with mypy | No |
 | `./script/lint_pylint` | Runs code quality checks with pylint | Yes, use `--auto` flag |
 
-#### Examples:
+#### Examples
 
 Run a specific lint check:
 ``` sh
@@ -142,7 +149,7 @@ Auto-fix formatting issues (Black + isort):
 ./script/lint_isort --auto
 ```
 
-### Testing:
+### Testing
 
 Run the test suite:
 ``` sh

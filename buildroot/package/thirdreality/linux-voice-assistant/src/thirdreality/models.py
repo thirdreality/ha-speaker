@@ -62,6 +62,19 @@ class TRPreferences(BasePreferences):
         prefs.thinking_sound = 1 if _coerce_int(data.get("thinking_sound", 0), 0) else 0
         prefs.mic_gain = _coerce_int(data.get("mic_gain", 30), 30)
         prefs.mic_mute = 0 if _coerce_int(data.get("mic_mute", 1), 1) == 0 else 1
+        prefs.mic_auto_gain = _coerce_int(data.get("mic_auto_gain", 0), 0)
+        prefs.mic_noise_suppression = _coerce_int(data.get("mic_noise_suppression", 0), 0)
+
+        raw_sens_1 = data.get("wake_word_1_sensitivity")
+        if raw_sens_1 is not None:
+            prefs.wake_word_1_sensitivity = float(raw_sens_1)
+        raw_sens_2 = data.get("wake_word_2_sensitivity")
+        if raw_sens_2 is not None:
+            prefs.wake_word_2_sensitivity = float(raw_sens_2)
+        raw_stop_sens = data.get("stop_word_sensitivity")
+        if raw_stop_sens is not None:
+            prefs.stop_word_sensitivity = float(raw_stop_sens)
+
         return prefs
 
     @classmethod
@@ -99,6 +112,16 @@ class TRPreferences(BasePreferences):
             data["mic_mute"] = 0 if self.is_mic_muted() else 1
         else:
             data["volume"] = None if self.volume is None else _clamp_normalized_volume(self.volume)
+
+        data["mic_auto_gain"] = self.mic_auto_gain
+        data["mic_noise_suppression"] = self.mic_noise_suppression
+
+        if self.wake_word_1_sensitivity is not None:
+            data["wake_word_1_sensitivity"] = self.wake_word_1_sensitivity
+        if self.wake_word_2_sensitivity is not None:
+            data["wake_word_2_sensitivity"] = self.wake_word_2_sensitivity
+        if self.stop_word_sensitivity is not None:
+            data["stop_word_sensitivity"] = self.stop_word_sensitivity
 
         return data
 

@@ -18,6 +18,7 @@ menu "thirdreality"
     source "package/thirdreality/python-tzlocal/Config.in"
     source "package/thirdreality/python-netifaces-2/Config.in"
     source "package/thirdreality/python-getmac/Config.in"
+    source "package/thirdreality/python-webrtc-noise-gain/Config.in"
 
     source "package/thirdreality/tr-ledring/Config.in"
     source "package/thirdreality/tr-supervisor/Config.in"
