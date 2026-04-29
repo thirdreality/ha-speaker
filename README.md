@@ -10,6 +10,7 @@ ThirdReality Voice&Music Assistant is an open-source speaker that supports conne
 - [Voice\&Music Assistant](#voicemusic-assistant)
   - [Build](#build)
   - [Flash](#flash)
+  - [Serial debugging](#serial-debugging)
   - [Setup the voice assist](#setup-the-voice-assist)
   - [Setup through HA APP](#setup-through-ha-app)
   - [Smart Home control with voice](#smart-home-control-with-voice)
@@ -74,6 +75,16 @@ The generated image is located at:
   <img src="doc/images/device_connect.jpg" alt="device-connect" width="400">
 </div>
 
+
+## Serial debugging
+
+1. Use debug board to connect the speaker to the PC. Make sure to use data cables.
+
+2. Open your serial debugging tool, select the corresponding port, and set the baud rate to 115200.
+
+<div align="left">
+  <img src="doc/images/serial-debug.png" alt="serial-debug" width="400">
+</div>
 
 ## Setup the voice assist
 
