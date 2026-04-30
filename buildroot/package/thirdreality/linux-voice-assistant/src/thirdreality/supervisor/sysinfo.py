@@ -94,20 +94,20 @@ class SystemInfoUpdater:
         self.supervisor = supervisor
         self.logger = LOGGER
         self.sys_info_thread = None
-        
+
         # Initialize device name immediately
         self._initialize_device_name()
-    
+
     def _initialize_device_name(self):
         """Initialize device name with retry mechanism"""
         if not hasattr(self.supervisor, 'system_info'):
             self.logger.error("Supervisor does not have system_info attribute")
             return
-            
+
         device_name = self._generate_device_name_with_retry()
         self.supervisor.system_info.name = device_name
         self.logger.info(f"Device name initialized: {device_name}")
-    
+
     def _generate_device_name_with_retry(self):
         configured_name = get_preferred_device_name()
         if configured_name and configured_name != DEFAULT_DEVICE_NAME:
@@ -122,7 +122,7 @@ class SystemInfoUpdater:
 
         self.logger.warning(f"Device info missing name/macAddress, using fallback: {DEFAULT_DEVICE_NAME}")
         return DEFAULT_DEVICE_NAME
-    
+
     def system_info_update_task(self):
         """System information update task"""
         self.logger.info("System information update task started")
@@ -133,11 +133,11 @@ class SystemInfoUpdater:
         if self.sys_info_thread and self.sys_info_thread.is_alive():
             self.logger.info("System information update already running")
             return
-            
+
         self.sys_info_thread = threading.Thread(target=self.system_info_update_task, daemon=True)
         self.sys_info_thread.start()
         self.logger.info("System information update started")
-        
+
     def stop(self):
         """Use supervisor.running to close, here for show"""
         self.logger.info("System Information stopped")

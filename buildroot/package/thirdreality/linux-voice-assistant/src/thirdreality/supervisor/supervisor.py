@@ -1,26 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
-import time
 import logging
-import signal
-import sys
+import os
 import threading
+import time
 import uuid
 from datetime import datetime
 
 from .sysinfo import SystemInfoUpdater, SystemInfo
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        # logging.FileHandler("/var/log/supervisor.log"),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger("Supervisor")
 
 class Supervisor:
@@ -37,7 +26,7 @@ class Supervisor:
 
         self.ota_state = {
             'ota_id': None,
-            'ota_status': 'idle',  # idle/download/install/success/failed
+            'ota_status': 'idle',
             'progress': 0,
             'start_time': '',
             'finish_time': '',
@@ -61,12 +50,12 @@ class Supervisor:
                     self.logger.info("Removed stale OTA artifact: %s", path)
             except Exception as e:
                 self.logger.warning("Failed to remove stale OTA artifact %s: %s", path, e)
-    
+
     def _update_ota_state(self, **kwargs):
         with self.ota_state_lock:
             self.ota_state.update(kwargs)
             self.logger.debug(f"OTA state updated: {kwargs}")
-    
+
     def get_ota_state(self):
         with self.ota_state_lock:
             return self.ota_state.copy()
@@ -99,13 +88,13 @@ class Supervisor:
 
     def perform_reboot(self):
         logging.info("Performing reboot...")
-        from .utils import util
-        util.perform_reboot()
+        from .utils import perform_reboot
+        perform_reboot()
 
     def perform_factory_reset(self):
         logging.info("Performing factory reset...")
-        from .utils import util
-        util.perform_factory_reset()
+        from .utils import perform_factory_reset
+        perform_factory_reset()
 
     def _mark_ota_failed(self, ota_id, error_msg):
         finish_time = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -230,63 +219,14 @@ class Supervisor:
             self.logger.error(error_msg, exc_info=True)
             return self._mark_ota_failed(ota_id, error_msg)
 
-    def _signal_handler(self, sig, frame):
-        logging.info("Signal received, stopping...")
-        self.cleanup()
-        sys.exit(0)
-
     def cleanup(self):
         """Clean up resources"""
         logger.info("Cleaning up resources...")
         self.shutdown_event.set()
-
-        # Stop HTTP server
         self._stop_http_server()
 
-    def run(self):
-        """Main run function"""
-        logger.info("Starting supervisor...")
-
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-
+    def start(self):
+        """Start supervisor services (non-blocking)."""
         self._start_http_server()
-
         self.sysinfo_update.start()
-
-        logger.info("Supervisor started, waiting for signals...")
-        try:
-            self.shutdown_event.wait()
-        except KeyboardInterrupt:
-            logger.info("Received keyboard interrupt")
-        finally:
-            self.cleanup()
-            logger.info("Supervisor stopped")
-
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="Supervisor Service")
-    parser.add_argument('--version', '-v', action='store_true', help='Show version and exit')
-    parser.add_argument('command', nargs='?', default='daemon', choices=['daemon'], help="Command to run: daemon")
-    parser.add_argument('arg', nargs='?', default=None, help="Argument for command (unused)")
-    args = parser.parse_args()
-
-    # Handle --version early and exit
-    if getattr(args, 'version', False):
-        print(f"Supervisor 1.0.0 (1.0.0)")
-        sys.exit(0)
-
-    if args.command == 'daemon':
-        supervisor = Supervisor()
-        try:
-            supervisor.run()
-        except KeyboardInterrupt:
-            supervisor.cleanup()
-            logger.info("Supervisor terminated by user")
-        except Exception as e:
-            logger.error(f"Unhandled exception: {e}")
-            supervisor.cleanup()
-    # CLI commands via local socket have been removed; only 'daemon' mode is supported
-
-if __name__ == "__main__":
-    main()
+        self.logger.info("Supervisor started")

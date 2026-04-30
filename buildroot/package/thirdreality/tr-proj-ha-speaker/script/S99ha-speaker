@@ -4,7 +4,6 @@
 #
 # Manages:
 #   - netmonitor       (WiFi/internet connectivity state machine)
-#   - supervisor       (python3 -m supervisor, HA integration)
 #   - voice-assistant  (python3 -m linux_voice_assistant)
 #   - snapclient       (music streaming)
 #   - WiFi power save  (BCM43438/AP6212 DHD firmware resets it after association)
@@ -20,7 +19,6 @@ PIDDIR=/var/run/thirdreality
 MONITOR_PIDFILE=$PIDDIR/ha-speaker.pid
 NETMONITOR_PIDFILE=$PIDDIR/netmonitor.pid
 VOICE_PIDFILE=$PIDDIR/voice-assistant.pid
-SUPERVISOR_PIDFILE=$PIDDIR/supervisor.pid
 DEVICE_CONF="/data/conf/device.json"
 
 SNAPCLIENT=/usr/bin/snapclient
@@ -33,7 +31,6 @@ CHECK_INTERVAL=10
 # Created by:  S99ha-speaker <service> stop
 # Removed by:  S99ha-speaker <service> start
 DISABLE_NETMONITOR=/tmp/ha_disable_netmonitor
-DISABLE_SUPERVISOR=/tmp/ha_disable_supervisor
 DISABLE_VOICE=/tmp/ha_disable_voice
 DISABLE_SNAPCLIENT=/tmp/ha_disable_snapclient
 
@@ -63,25 +60,6 @@ stop_netmonitor() {
         kill "$(cat "$NETMONITOR_PIDFILE")" 2>/dev/null
     fi
     rm -f "$NETMONITOR_PIDFILE"
-}
-
-# ---------------------------------------------------------------------------
-# supervisor
-# ---------------------------------------------------------------------------
-
-start_supervisor() {
-    is_running "$SUPERVISOR_PIDFILE" && return 0
-    rm -f "$SUPERVISOR_PIDFILE" "$DISABLE_SUPERVISOR"
-    python3 -m supervisor 2>/dev/null &
-    echo $! > "$SUPERVISOR_PIDFILE"
-}
-
-stop_supervisor() {
-    touch "$DISABLE_SUPERVISOR"
-    if is_running "$SUPERVISOR_PIDFILE"; then
-        kill "$(cat "$SUPERVISOR_PIDFILE")" 2>/dev/null
-    fi
-    rm -f "$SUPERVISOR_PIDFILE"
 }
 
 # ---------------------------------------------------------------------------
@@ -152,13 +130,7 @@ monitor_loop() {
             start_netmonitor
         fi
 
-        # 3. supervisor
-        if [ ! -f "$DISABLE_SUPERVISOR" ] && ! is_running "$SUPERVISOR_PIDFILE"; then
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] supervisor not running, restarting..."
-            start_supervisor
-        fi
-
-        # 4. voice-assistant
+        # 2. voice-assistant
         if [ ! -f "$DISABLE_VOICE" ] && ! is_running "$VOICE_PIDFILE"; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] voice-assistant not running, restarting..."
             start_voice_assistant
@@ -207,7 +179,6 @@ start() {
     touch "$DISABLE_VOICE" "$DISABLE_SNAPCLIENT"
 
     start_netmonitor
-    start_supervisor
 
     monitor_loop &
     echo $! > "$MONITOR_PIDFILE"
@@ -252,14 +223,6 @@ service_cmd() {
                 stop)    stop_netmonitor ;;
                 restart) stop_netmonitor; sleep 1; start_netmonitor ;;
                 *) echo "Usage: $0 netmonitor {start|stop|restart}"; exit 1 ;;
-            esac
-            ;;
-        supervisor)
-            case "$action" in
-                start)   start_supervisor ;;
-                stop)    stop_supervisor ;;
-                restart) stop_supervisor; sleep 1; start_supervisor ;;
-                *) echo "Usage: $0 supervisor {start|stop|restart}"; exit 1 ;;
             esac
             ;;
         voice-assistant)

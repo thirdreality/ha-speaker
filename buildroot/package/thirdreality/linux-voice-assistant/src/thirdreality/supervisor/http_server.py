@@ -80,7 +80,7 @@ class SupervisorHTTPServer:
             if not method:
                 return
 
-            self.logger.info("%s %s from %s", method, path, addr[0])
+            self.logger.debug("%s %s from %s", method, path, addr[0])
 
             if method == "OPTIONS":
                 self._send_response(conn, 200, {"ok": True})
@@ -168,7 +168,7 @@ class SupervisorHTTPServer:
             return
 
         post_data = body.decode("utf-8")
-        self.logger.info("POST data: %s", post_data)
+        self.logger.debug("POST data: %s", post_data)
         params, signature, is_valid = self._parse_post_data(post_data, headers.get("content-type", ""))
 
         if "command" not in params:
@@ -248,7 +248,7 @@ class SupervisorHTTPServer:
         try:
             decoded = urllib.parse.unquote(encoded)
             payload = base64.b64decode(decoded).decode("utf-8")
-            self.logger.info("param_data (decoded): %s", payload)
+            self.logger.debug("param_data (decoded): %s", payload)
             parsed = json.loads(payload)
             if isinstance(parsed, dict):
                 return parsed

@@ -35,6 +35,13 @@ except ImportError as _e:
     import logging as _logging
     _logging.getLogger(__name__).warning("TRSatelliteProtocol not available, LED disabled: %s", _e)
     from .satellite import VoiceSatelliteProtocol
+
+_start_supervisor = None
+try:
+    from thirdreality.supervisor import start_supervisor_server as _start_supervisor
+except ImportError:
+    pass
+
 from .util import (
     get_default_interface,
     get_default_ipv4,
@@ -412,6 +419,9 @@ async def main() -> None:
             name="HomeButtonMonitor",
         )
         home_button_thread.start()
+
+    if _start_supervisor is not None:
+        _start_supervisor()
 
     process_audio_thread = threading.Thread(
         target=process_audio,

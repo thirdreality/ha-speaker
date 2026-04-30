@@ -14,7 +14,7 @@ def force_sync():
     """
     Force sync to flush NAND cache by executing sync command 3 times.
     This is necessary due to NAND caching mechanisms.
-    
+
     Returns:
         bool: True if sync commands executed successfully, False otherwise
     """
@@ -31,10 +31,10 @@ def force_sync():
 def perform_reboot():
     """
         Safely stop necessary services and reboot the system.
-        
+
         This function stops Docker service before rebooting to prevent data corruption.
         Docker stop failure is ignored and reboot will proceed anyway.
-        
+
         Returns:
             bool: True if reboot command was executed (may not return if reboot succeeds)
         """
@@ -44,12 +44,12 @@ def perform_reboot():
             force_sync()
         except Exception:
             pass  # Sync failure should not prevent reboot
-        
+
         # Execute reboot command (will not return if successful)
         # Use check=False to ensure reboot is attempted even if command returns error
         LOGGER.info("Executing reboot command...")
         subprocess.run(["reboot"], check=False)
-        
+
         # If we reach here, reboot command may have failed, try alternative
         # Give a moment for reboot to take effect
         time.sleep(1)
@@ -67,7 +67,7 @@ def perform_factory_reset():
     try:
         # Ensure all data is flushed to disk before factory reset
         force_sync()
-        
+
         subprocess.run(["/etc/adckey/adckey_function.sh", "longpressHome"], check=True)
         return True
     except Exception as e:
