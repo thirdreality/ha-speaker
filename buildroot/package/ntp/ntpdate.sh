@@ -30,7 +30,7 @@ if [ -x $NTPDATE_BIN ] ; then
             fi
             /etc/init.d/S44bluetooth stop
             /etc/init.d/S99ha-speaker voice-assistant start
-            /etc/init.d/S99ha-speaker snapclient start
+            /etc/init.d/S99ha-speaker sendspin-client start
 
             /bin/date +%Y-%m-%d > /etc/last_date
             #If the platform have RTC, we will write back to RTC HW

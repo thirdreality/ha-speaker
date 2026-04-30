@@ -1,0 +1,14 @@
+config BR2_PACKAGE_SENDSPIN_CLIENT
+	bool "sendspin-client"
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_PORTAUDIO
+	select BR2_PACKAGE_PORTAUDIO_ALSA
+	select BR2_PACKAGE_AVAHI
+	select BR2_PACKAGE_AVAHI_DAEMON
+	select BR2_PACKAGE_AVAHI_LIBDNSSD_COMPATIBILITY
+	help
+	  Sendspin synchronized audio streaming client for ThirdReality speaker.
+	  Uses PortAudio for audio output and avahi for mDNS discovery.
+
+	  https://github.com/Sendspin/sendspin-cpp

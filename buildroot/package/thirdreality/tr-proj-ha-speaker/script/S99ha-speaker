@@ -5,15 +5,14 @@
 # Manages:
 #   - netmonitor       (WiFi/internet connectivity state machine)
 #   - voice-assistant  (python3 -m linux_voice_assistant)
-#   - snapclient       (music streaming)
-#   - WiFi power save  (BCM43438/AP6212 DHD firmware resets it after association)
+#   - sendspin-client  (music streaming)
 #   - pulseaudio       (reboot device if it dies)
 #
 # Usage:
 #   S99ha-speaker start|stop|restart
 #   S99ha-speaker <service> start|stop|restart
 #
-# Services: netmonitor, supervisor, voice-assistant, snapclient
+# Services: netmonitor, voice-assistant, sendspin-client
 
 PIDDIR=/var/run/thirdreality
 MONITOR_PIDFILE=$PIDDIR/ha-speaker.pid
@@ -21,9 +20,8 @@ NETMONITOR_PIDFILE=$PIDDIR/netmonitor.pid
 VOICE_PIDFILE=$PIDDIR/voice-assistant.pid
 DEVICE_CONF="/data/conf/device.json"
 
-SNAPCLIENT=/usr/bin/snapclient
-[ -r /etc/default/snapclient ] && . /etc/default/snapclient
-SNAPCLIENT_OPTS="-d $SNAPCLIENT_OPTS"
+SENDSPIN_CLIENT=/usr/bin/sendspin-client
+[ -r /etc/default/sendspin-client ] && . /etc/default/sendspin-client
 
 CHECK_INTERVAL=10
 
@@ -32,7 +30,7 @@ CHECK_INTERVAL=10
 # Removed by:  S99ha-speaker <service> start
 DISABLE_NETMONITOR=/tmp/ha_disable_netmonitor
 DISABLE_VOICE=/tmp/ha_disable_voice
-DISABLE_SNAPCLIENT=/tmp/ha_disable_snapclient
+DISABLE_SENDSPIN=/tmp/ha_disable_sendspin
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -90,30 +88,23 @@ stop_voice_assistant() {
 }
 
 # ---------------------------------------------------------------------------
-# snapclient
+# sendspin-client (music streaming)
 # ---------------------------------------------------------------------------
 
-start_snapclient() {
-    pidof snapclient > /dev/null 2>&1 && return 0
-    rm -f "$DISABLE_SNAPCLIENT"
-    start-stop-daemon --start --quiet --name snapclient --exec "$SNAPCLIENT" -- $SNAPCLIENT_OPTS
+start_sendspin() {
+    pidof sendspin-client > /dev/null 2>&1 && return 0
+    rm -f "$DISABLE_SENDSPIN"
+    local spk_name
+    spk_name=$(jq -r '.device.name // "3RSPK Speaker"' "$DEVICE_CONF")
+    start-stop-daemon --start --quiet --background --name sendspin-client \
+        --exec "$SENDSPIN_CLIENT" -- $SENDSPIN_CLIENT_OPTS "$spk_name"
 }
 
-stop_snapclient() {
-    touch "$DISABLE_SNAPCLIENT"
-    start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --name snapclient
-    start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --exec "$SNAPCLIENT"
+stop_sendspin() {
+    touch "$DISABLE_SENDSPIN"
+    start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --name sendspin-client
+    start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --name sendspin-client
 }
-
-# ---------------------------------------------------------------------------
-# WiFi power save
-# ---------------------------------------------------------------------------
-
-# wifi_power_save_check() {
-#     if iw dev wlan0 get power_save 2>/dev/null | grep -q "Power save: on"; then
-#         iw dev wlan0 set power_save off 2>/dev/null
-#     fi
-# }
 
 # ---------------------------------------------------------------------------
 # Monitor loop
@@ -121,10 +112,7 @@ stop_snapclient() {
 
 monitor_loop() {
     while true; do
-        # 1. WiFi power save
-        # wifi_power_save_check
-
-        # 2. netmonitor
+        # 1. netmonitor
         if [ ! -f "$DISABLE_NETMONITOR" ] && ! is_running "$NETMONITOR_PIDFILE"; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] netmonitor not running, restarting..."
             start_netmonitor
@@ -136,13 +124,13 @@ monitor_loop() {
             start_voice_assistant
         fi
 
-        # 5. snapclient
-        if [ ! -f "$DISABLE_SNAPCLIENT" ] && ! pidof snapclient > /dev/null 2>&1; then
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] snapclient not running, restarting..."
-            start_snapclient
+        # 3. sendspin-client
+        if [ ! -f "$DISABLE_SENDSPIN" ] && ! pidof sendspin-client > /dev/null 2>&1; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] sendspin-client not running, restarting..."
+            start_sendspin
         fi
 
-        # 6. pulseaudio
+        # 4. pulseaudio
         if ! pidof pulseaudio > /dev/null 2>&1; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] pulseaudio died, rebooting..."
             sync
@@ -174,9 +162,9 @@ start() {
         paplay /usr/share/thirdreality/audio/setup_mode.wav &
     fi
 
-    # voice-assistant and snapclient require network (NTP sync).
+    # voice-assistant and sendspin-client require network (NTP sync).
     # Disable them at boot; ntpdate.sh enables them after first sync.
-    touch "$DISABLE_VOICE" "$DISABLE_SNAPCLIENT"
+    touch "$DISABLE_VOICE" "$DISABLE_SENDSPIN"
 
     start_netmonitor
 
@@ -196,11 +184,10 @@ stop() {
 
     /etc/init.d/S44bluetooth stop
     stop_voice_assistant
-    stop_snapclient
-    stop_supervisor
+    stop_sendspin
     stop_netmonitor
     # Clear disable flags so next start brings everything up
-    rm -f "$DISABLE_NETMONITOR" "$DISABLE_SUPERVISOR" "$DISABLE_VOICE" "$DISABLE_SNAPCLIENT"
+    rm -f "$DISABLE_NETMONITOR" "$DISABLE_VOICE" "$DISABLE_SENDSPIN"
 }
 
 restart() {
@@ -233,17 +220,17 @@ service_cmd() {
                 *) echo "Usage: $0 voice-assistant {start|stop|restart}"; exit 1 ;;
             esac
             ;;
-        snapclient)
+        sendspin-client)
             case "$action" in
-                start)   start_snapclient ;;
-                stop)    stop_snapclient ;;
-                restart) stop_snapclient; sleep 1; start_snapclient ;;
-                *) echo "Usage: $0 snapclient {start|stop|restart}"; exit 1 ;;
+                start)   start_sendspin ;;
+                stop)    stop_sendspin ;;
+                restart) stop_sendspin; sleep 1; start_sendspin ;;
+                *) echo "Usage: $0 sendspin-client {start|stop|restart}"; exit 1 ;;
             esac
             ;;
         *)
             echo "Unknown service: $svc"
-            echo "Services: netmonitor, supervisor, voice-assistant, snapclient"
+            echo "Services: netmonitor, voice-assistant, sendspin-client"
             exit 1
             ;;
     esac
@@ -257,12 +244,12 @@ case "$1" in
     start)   start   ;;
     stop)    stop    ;;
     restart) restart ;;
-    netmonitor|supervisor|voice-assistant|snapclient)
+    netmonitor|voice-assistant|sendspin-client)
         service_cmd "$1" "$2"
         ;;
     *)
         echo "Usage: $0 {start|stop|restart}"
-        echo "       $0 {netmonitor|supervisor|voice-assistant|snapclient} {start|stop|restart}"
+        echo "       $0 {netmonitor|voice-assistant|sendspin-client} {start|stop|restart}"
         exit 1
         ;;
 esac
