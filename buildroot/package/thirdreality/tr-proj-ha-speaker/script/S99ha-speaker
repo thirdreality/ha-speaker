@@ -93,6 +93,10 @@ stop_voice_assistant() {
 
 start_sendspin() {
     pidof sendspin-client > /dev/null 2>&1 && return 0
+
+    /etc/init.d/S50avahi-daemon stop 2>/dev/null
+    /etc/init.d/S50avahi-daemon start 2>/dev/null
+    
     rm -f "$DISABLE_SENDSPIN"
     local spk_name
     spk_name=$(jq -r '.device.name // "3RSPK Speaker"' "$DEVICE_CONF")
