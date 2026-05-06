@@ -17,7 +17,8 @@ ThirdReality Voice&Music Assistant is an open-source speaker that supports conne
   - [Smart Home control with button](#smart-home-control-with-button)
   - [Play Music](#play-music)
   - [Multi-Room Music](#multi-room-music)
-  - [Trouble Shooting](#trouble-shooting)
+    - [Work with Apple HomePod](#work-with-apple-homepod)
+    - [Work with Sonos](#work-with-sonos)
 
 ---
 
@@ -199,43 +200,73 @@ If it doesn’t exist, please add it using [Music Assistant github repository](h
   <img src="doc/images/music-1.png" width="30%">
 </div>
 
-Go to the Music Assistant: **Settings → Providers → Add a new provider**. Search for Snapcast and add it.
+Go to the Music Assistant: **Settings → Player Providers → Add a player provider**. Search for Sendspin and add it.
 
 <div align="left">
   <img src="doc/images/music-2.png" width="30%">
+</div>
+
+Then you can go to **Settings → Players** and find the player named 3RSPK-XXXXXXXXXXXX. 
+
+<div align="left">
   <img src="doc/images/music-3.png" width="30%">
 </div>
 
-Then you can follow the same steps to add Spotify or any other supported music playback source.
+If it doesn’t show up, try reloading Sendspin.
+
+<div align="left">
+  <img src="doc/images/music-4.png" width="30%">
+</div>
+
+Next, we need to add music sources. Go to **Settings → Music Sources → Add a music source**, then select your desired music source.
+
+<div align="left">
+  <img src="doc/images/music-5.png" width="30%">
+</div>
+
 
 Finally, select a song and the speaker, and you can start playback! 🎵
 
 <div align="left">
-  <img src="doc/images/music-4.png" width="30%">
+  <img src="doc/images/music-6.png" width="30%">
 </div>
 
 ---
 
 ## Multi-Room Music
 
+official documentation: https://www.music-assistant.io/faq/groups/#groups
+
+We use [Sendspin](https://www.sendspin-audio.com/) as the playback protocol, so it can work with any device that supports AirPlay.
+
+### Work with Apple HomePod
+
+Go to the Music Assistant: **Settings → Player Providers → Add a player provider**. Search for and add AirPlay and Sync Group Player.
+
 <div align="left">
-  <img src="doc/images/music-5.png" width="30%">
   <img src="doc/images/music-6.png" width="30%">
 </div>
 
----
+Then you can create a sync group player with your thirdreality speaker and HomePod.
 
-## Trouble Shooting
+<div align="left">
+  <img src="doc/images/music-7.png" width="30%">
+  <img src="doc/images/music-8.png" width="30%">
+  <img src="doc/images/music-9.png" width="30%">
+</div>
 
-If there are multiple Snapcast servers in your environment, you need to specify the server’s IP address to ensure the speaker connects to the correct one. Currently, this must be set manually.
+### Work with Sonos
 
-```
-$ vi /etc/default/snapclient
+Go to the Music Assistant: **Settings → Player Providers → Add a player provider**. Search for and add SONOS and Universal Group Player.
 
-  SNAPCLIENT_OPTS="--player pulse:buffer_time=500 -h 10.1.0.240"  # Replace with your Snapcast server's IP address
+<div align="left">
+  <img src="doc/images/music-10.png" width="30%">
+</div>
 
-$ /etc/init.d/S99ha-speaker snapclient restart
+Then you can create a universal group player with your thirdreality speaker and Sonos.
 
-```
-
-
+<div align="left">
+  <img src="doc/images/music-11.png" width="30%">
+  <img src="doc/images/music-12.png" width="30%">
+  <img src="doc/images/music-13.png" width="30%">
+</div>
