@@ -16,6 +16,8 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -24,6 +26,55 @@ using namespace sendspin;
 
 static std::atomic<bool> g_running{true};
 static void signal_handler(int) { g_running = false; }
+
+static constexpr const char *SOUND_CONF = "/data/conf/sound.json";
+
+// Read "volume" (0-100) from sound.json. Returns -1 on failure.
+static int read_device_volume() {
+  std::ifstream f(SOUND_CONF);
+  if (!f) return -1;
+  std::string content((std::istreambuf_iterator<char>(f)),
+                      std::istreambuf_iterator<char>());
+  auto pos = content.find("\"volume\"");
+  if (pos == std::string::npos) return -1;
+  pos = content.find(':', pos);
+  if (pos == std::string::npos) return -1;
+  return std::atoi(content.c_str() + pos + 1);
+}
+
+// Update "volume" field in sound.json (minimal in-place replace, no jq dependency)
+static void persist_volume(int vol) {
+  std::ifstream in(SOUND_CONF);
+  if (!in) return;
+  std::string content((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+  in.close();
+
+  // Find "volume": <number> and replace the number
+  auto pos = content.find("\"volume\"");
+  if (pos == std::string::npos) return;
+  pos = content.find(':', pos);
+  if (pos == std::string::npos) return;
+  pos++;
+  // Skip whitespace
+  while (pos < content.size() && (content[pos] == ' ' || content[pos] == '\t')) pos++;
+  // Find end of number
+  auto end = pos;
+  while (end < content.size() && (content[end] >= '0' && content[end] <= '9')) end++;
+  if (end == pos) return;
+
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%d", vol);
+  content.replace(pos, end - pos, buf);
+
+  // Atomic write: tmp file + rename
+  std::string tmp = std::string(SOUND_CONF) + ".tmp";
+  std::ofstream out(tmp, std::ios::trunc);
+  if (!out) return;
+  out << content;
+  out.close();
+  rename(tmp.c_str(), SOUND_CONF);
+}
 
 static int64_t now_us() {
   return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -123,8 +174,16 @@ class PulsePlayerListener : public PlayerRoleListener {
     close_pa(false);  // Flush — discard immediately
   }
 
-  void on_volume_changed(uint8_t /*volume*/) override {
-    // Volume controlled locally via hardware buttons and /data/conf/sound.json
+  void on_volume_changed(uint8_t volume) override {
+    // Sendspin volume is 0-100 (percent). Apply to PA sink and persist.
+    int percent = volume;
+    if (percent > 100) percent = 100;
+    last_volume_ = percent;
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "pactl set-sink-volume @DEFAULT_SINK@ %d%%", percent);
+    system(cmd);
+    persist_volume(percent);
+    fprintf(stderr, "[sendspin] volume: %d%%\n", percent);
   }
 
   void on_mute_changed(bool muted) override {
@@ -133,6 +192,19 @@ class PulsePlayerListener : public PlayerRoleListener {
 
   // Called from main loop to handle deferred open
   void try_deferred_open() {}
+
+  // Check if local volume changed (e.g., hardware buttons) and sync to server
+  void sync_local_volume(PlayerRole &player) {
+    int vol = read_device_volume();
+    if (vol < 0) return;
+    if (vol != last_volume_) {
+      // Only update last_volume_ if publish_state will actually send
+      // (i.e., there's an active connection). Otherwise retry next poll.
+      player.update_volume(static_cast<uint8_t>(vol));
+      last_volume_ = vol;
+      fprintf(stderr, "[sendspin] local volume synced: %d%%\n", vol);
+    }
+  }
 
  private:
   void close_pa(bool drain = true) {
@@ -150,6 +222,7 @@ class PulsePlayerListener : public PlayerRoleListener {
   std::atomic<pa_simple *> pa_{nullptr};
   PlayerRole *player_{nullptr};
   size_t frame_size_{4};
+  int last_volume_{-1};
 };
 
 // ============================================================================
@@ -233,9 +306,17 @@ int main(int argc, char *argv[]) {
   fprintf(stderr, "[sendspin] listening as \"%s\"\n", friendly_name.c_str());
   if (!connect_url.empty()) client.connect_to(connect_url);
 
+  int poll_count = 0;
   while (g_running) {
     client.loop();
     player_listener.try_deferred_open();
+
+    // Check local volume every ~1s (100 * 10ms)
+    if (++poll_count >= 100) {
+      poll_count = 0;
+      player_listener.sync_local_volume(player);
+    }
+
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
