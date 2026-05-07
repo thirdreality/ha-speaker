@@ -144,6 +144,9 @@ class PulsePlayerListener : public PlayerRoleListener {
     int err = 0;
     if (pa_simple_write(pa, data, aligned, &err) < 0) {
       fprintf(stderr, "pa_simple_write: %s\n", pa_strerror(err));
+      // Connection lost (e.g., PA sink reconfigured during voice capture).
+      // Close and let next on_audio_write() reopen.
+      close_pa(false);
       return length;  // Discard to keep sync task moving
     }
 
