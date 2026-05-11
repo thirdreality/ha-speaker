@@ -8,7 +8,7 @@
 #
 ################################################################################
 
-SENDSPIN_CLIENT_VERSION = v0.3.1
+SENDSPIN_CLIENT_VERSION = v0.4.0
 SENDSPIN_CLIENT_SITE = $(call github,Sendspin,sendspin-cpp,$(SENDSPIN_CLIENT_VERSION))
 SENDSPIN_CLIENT_LICENSE = Apache-2.0
 SENDSPIN_CLIENT_LICENSE_FILES = LICENSE

@@ -11,7 +11,7 @@ target_compile_features(sendspin-client PRIVATE cxx_std_20)
 
 # PulseAudio
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PULSE REQUIRED libpulse-simple)
+pkg_check_modules(PULSE REQUIRED libpulse libpulse-simple)
 target_include_directories(sendspin-client PRIVATE ${PULSE_INCLUDE_DIRS})
 target_link_libraries(sendspin-client PRIVATE ${PULSE_LIBRARIES})
 

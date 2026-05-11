@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Key design: on_audio_write() BLOCKS (as intended by sendspin-cpp).
-// PA stream is opened in on_stream_start() on the main loop thread.
+// PA stream is opened in on_audio_write() on the sync task thread.
 
 #include <sendspin/client.h>
 #include <sendspin/controller_role.h>
@@ -10,6 +10,7 @@
 #include <sendspin/player_role.h>
 
 #include <pulse/error.h>
+#include <pulse/pulseaudio.h>
 #include <pulse/simple.h>
 
 #include <atomic>
@@ -82,6 +83,55 @@ static int64_t now_us() {
 }
 
 // ============================================================================
+// Non-blocking volume control via PulseAudio async API
+// ============================================================================
+
+class PulseVolumeController {
+ public:
+  PulseVolumeController() {
+    ml_ = pa_threaded_mainloop_new();
+    if (!ml_) return;
+    ctx_ = pa_context_new(pa_threaded_mainloop_get_api(ml_), "sendspin-vol");
+    if (!ctx_) return;
+    pa_context_set_state_callback(ctx_, context_state_cb, this);
+    pa_context_connect(ctx_, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
+    pa_threaded_mainloop_start(ml_);
+  }
+
+  ~PulseVolumeController() {
+    if (ml_) {
+      pa_threaded_mainloop_stop(ml_);
+      if (ctx_) {
+        pa_context_disconnect(ctx_);
+        pa_context_unref(ctx_);
+      }
+      pa_threaded_mainloop_free(ml_);
+    }
+  }
+
+  void set_volume_percent(int percent) {
+    if (!ctx_ || !ml_) return;
+    pa_threaded_mainloop_lock(ml_);
+    if (pa_context_get_state(ctx_) == PA_CONTEXT_READY) {
+      pa_cvolume vol;
+      pa_cvolume_set(&vol, 2, pa_sw_volume_from_linear(percent / 100.0));
+      auto *op = pa_context_set_sink_volume_by_name(ctx_, "@DEFAULT_SINK@", &vol, nullptr, nullptr);
+      if (op) pa_operation_unref(op);
+    }
+    pa_threaded_mainloop_unlock(ml_);
+  }
+
+ private:
+  static void context_state_cb(pa_context *c, void *userdata) {
+    (void)c;
+    (void)userdata;
+  }
+
+  pa_threaded_mainloop *ml_{nullptr};
+  pa_context *ctx_{nullptr};
+};
+
+// ============================================================================
 // PulseAudio player listener — blocking on_audio_write
 // ============================================================================
 
@@ -90,6 +140,7 @@ class PulsePlayerListener : public PlayerRoleListener {
   ~PulsePlayerListener() override { close_pa(true); }
 
   void set_player(PlayerRole *p) { player_ = p; }
+  void set_volume_controller(PulseVolumeController *vc) { vol_ctrl_ = vc; }
 
   // Called on sync task thread. BLOCKS until audio is written.
   size_t on_audio_write(uint8_t *data, size_t length, uint32_t /*timeout_ms*/) override {
@@ -97,6 +148,13 @@ class PulsePlayerListener : public PlayerRoleListener {
 
     // Open PA on first call if not yet open
     if (!pa_.load()) {
+      // Backoff: avoid hammering pa_simple_new if PA is unavailable
+      int64_t now = now_us();
+      if (now - last_open_attempt_us_ < backoff_us_) {
+        return length;  // Discard until backoff expires
+      }
+      last_open_attempt_us_ = now;
+
       pa_sample_spec ss;
       ss.format = PA_SAMPLE_S16LE;
       ss.channels = 2;
@@ -127,10 +185,13 @@ class PulsePlayerListener : public PlayerRoleListener {
       if (pa) {
         frame_size_ = bytes_per_frame;
         pa_.store(pa);
+        backoff_us_ = kInitialBackoffUs;  // Reset backoff on success
         fprintf(stderr, "[sendspin] opened PA %uHz %uch (frame=%zu, tlength=%ums)\n",
                 ss.rate, ss.channels, frame_size_, tlength_bytes * 1000 / (ss.rate * bytes_per_frame));
       } else {
         fprintf(stderr, "[sendspin] pa_simple_new failed: %s\n", pa_strerror(err));
+        // Exponential backoff: 100ms, 200ms, 400ms, ... up to 5s
+        backoff_us_ = std::min(backoff_us_ * 2, kMaxBackoffUs);
         return length;  // Discard to keep sync task moving
       }
     }
@@ -178,13 +239,10 @@ class PulsePlayerListener : public PlayerRoleListener {
   }
 
   void on_volume_changed(uint8_t volume) override {
-    // Sendspin volume is 0-100 (percent). Apply to PA sink and persist.
     int percent = volume;
     if (percent > 100) percent = 100;
     last_volume_ = percent;
-    char cmd[64];
-    snprintf(cmd, sizeof(cmd), "pactl set-sink-volume @DEFAULT_SINK@ %d%%", percent);
-    system(cmd);
+    if (vol_ctrl_) vol_ctrl_->set_volume_percent(percent);
     persist_volume(percent);
     fprintf(stderr, "[sendspin] volume: %d%%\n", percent);
   }
@@ -201,8 +259,6 @@ class PulsePlayerListener : public PlayerRoleListener {
     int vol = read_device_volume();
     if (vol < 0) return;
     if (vol != last_volume_) {
-      // Only update last_volume_ if publish_state will actually send
-      // (i.e., there's an active connection). Otherwise retry next poll.
       player.update_volume(static_cast<uint8_t>(vol));
       last_volume_ = vol;
       fprintf(stderr, "[sendspin] local volume synced: %d%%\n", vol);
@@ -210,6 +266,9 @@ class PulsePlayerListener : public PlayerRoleListener {
   }
 
  private:
+  static constexpr int64_t kInitialBackoffUs = 100'000;   // 100ms
+  static constexpr int64_t kMaxBackoffUs = 5'000'000;     // 5s
+
   void close_pa(bool drain = true) {
     auto *pa = pa_.exchange(nullptr);
     if (pa) {
@@ -224,8 +283,11 @@ class PulsePlayerListener : public PlayerRoleListener {
 
   std::atomic<pa_simple *> pa_{nullptr};
   PlayerRole *player_{nullptr};
+  PulseVolumeController *vol_ctrl_{nullptr};
   size_t frame_size_{4};
   int last_volume_{-1};
+  int64_t last_open_attempt_us_{0};
+  int64_t backoff_us_{kInitialBackoffUs};
 };
 
 // ============================================================================
@@ -283,16 +345,20 @@ int main(int argc, char *argv[]) {
 
   SendspinClient client(std::move(config));
 
+  PulseVolumeController vol_ctrl;
+
   PulsePlayerListener player_listener;
   PlayerRoleConfig player_config;
   player_config.audio_formats = {
       {SendspinCodecFormat::FLAC, 2, 44100, 16},
       {SendspinCodecFormat::FLAC, 2, 48000, 16},
+      {SendspinCodecFormat::OPUS, 2, 48000, 16},
       {SendspinCodecFormat::PCM, 2, 44100, 16},
       {SendspinCodecFormat::PCM, 2, 48000, 16},
   };
   auto &player = client.add_player(std::move(player_config));
   player_listener.set_player(&player);
+  player_listener.set_volume_controller(&vol_ctrl);
   player.set_listener(&player_listener);
 
   SimpleMetadataListener metadata_listener;
