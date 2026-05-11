@@ -6,3 +6,4 @@
 /TODO.txt
 /*.vscode
 /*.github
+!/.github/
