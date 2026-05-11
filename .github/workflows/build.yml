@@ -1,0 +1,62 @@
+name: Build Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Firmware version (default: date-based)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo apt-get clean
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout submodules
+        run: git submodule update --init --depth 1
+
+      - name: Cache buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: buildroot/dl
+          key: buildroot-dl-${{ hashFiles('buildroot/configs/*_defconfig') }}
+          restore-keys: |
+            buildroot-dl-
+
+      - name: Ensure buildroot/dl is a real directory
+        run: |
+          if [ -L buildroot/dl ]; then rm buildroot/dl; fi
+          mkdir -p buildroot/dl
+
+      - name: Build Docker image
+        run: docker build -t voice-music-assistant-builder .
+
+      - name: Build firmware
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          ARGS="trspk"
+          if [ -n "$VERSION" ]; then
+            ARGS="trspk $VERSION"
+          fi
+          docker run --rm \
+            -u "$(id -u):$(id -g)" \
+            -v "$PWD:/build" \
+            -e "HOME=/build" \
+            voice-music-assistant-builder $ARGS
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: image/*
+          if-no-files-found: error
