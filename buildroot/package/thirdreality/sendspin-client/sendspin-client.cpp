@@ -26,7 +26,10 @@
 using namespace sendspin;
 
 static std::atomic<bool> g_running{true};
+static std::atomic<bool> g_ducked{false};
 static void signal_handler(int) { g_running = false; }
+static void sigusr1_handler(int) { g_ducked = true; }
+static void sigusr2_handler(int) { g_ducked = false; }
 
 static constexpr const char *SOUND_CONF = "/data/conf/sound.json";
 
@@ -202,6 +205,14 @@ class PulsePlayerListener : public PlayerRoleListener {
     size_t aligned = length - (length % frame_size_);
     if (aligned == 0) return length;
 
+    // Duck: attenuate PCM samples when voice assistant is active
+    if (g_ducked.load(std::memory_order_relaxed)) {
+      auto *samples = reinterpret_cast<int16_t *>(data);
+      size_t count = aligned / sizeof(int16_t);
+      for (size_t i = 0; i < count; ++i)
+        samples[i] = static_cast<int16_t>(samples[i] >> 2);  // -12dB
+    }
+
     int err = 0;
     if (pa_simple_write(pa, data, aligned, &err) < 0) {
       fprintf(stderr, "pa_simple_write: %s\n", pa_strerror(err));
@@ -333,6 +344,8 @@ int main(int argc, char *argv[]) {
 
   signal(SIGINT, signal_handler);
   signal(SIGTERM, signal_handler);
+  signal(SIGUSR1, sigusr1_handler);
+  signal(SIGUSR2, sigusr2_handler);
 
   SendspinClient::set_log_level(log_level);
 

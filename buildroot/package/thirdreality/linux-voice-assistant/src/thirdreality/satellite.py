@@ -11,6 +11,8 @@ import block needs to be re-verified; this file never changes.
 import asyncio
 import json
 import logging
+import os
+import signal
 import subprocess
 from pathlib import Path
 from typing import Dict, Optional
@@ -112,6 +114,16 @@ def _led_fire(state: str, to_idle: bool = False) -> None:
         proc.kill()
     except Exception:
         _LOGGER.warning("[led] exception for state: %s", state, exc_info=True)
+
+
+def _signal_sendspin(sig_name: str) -> None:
+    """Send a signal to sendspin-client process. USR1=voice active, USR2=voice done."""
+    try:
+        pid = int(subprocess.check_output(["pidof", "sendspin-client"], stderr=subprocess.DEVNULL).strip())
+        os.kill(pid, signal.SIGUSR1 if sig_name == "USR1" else signal.SIGUSR2)
+        _LOGGER.debug("[sendspin] sent SIG%s to pid %d", sig_name, pid)
+    except (subprocess.CalledProcessError, ProcessLookupError, ValueError):
+        _LOGGER.debug("[sendspin] sendspin-client not running, skipping SIG%s", sig_name)
 
 
 class TRSatelliteProtocol(VoiceSatelliteProtocol):
@@ -590,3 +602,13 @@ class TRSatelliteProtocol(VoiceSatelliteProtocol):
             _led_fire("listening")
         else:
             _led_fire("idle", to_idle=True)
+
+    def duck(self) -> None:
+        _LOGGER.debug("[TR] duck -> signal sendspin EXTERNAL_SOURCE")
+        super().duck()
+        _signal_sendspin("USR1")
+
+    def unduck(self) -> None:
+        _LOGGER.debug("[TR] unduck -> signal sendspin SYNCHRONIZED")
+        super().unduck()
+        _signal_sendspin("USR2")
