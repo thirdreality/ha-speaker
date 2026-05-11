@@ -40,6 +40,7 @@ No host dependencies required other than Docker.
 ```
 ./go --docker trspk <version>        // Build inside Docker (recommended)
 ./go --docker-shell                  // Enter container interactively for debugging
+./go --docker trspk rebuild <package>  // Rebuild a single package in Docker
 ```
 
 ### Native Build
@@ -61,6 +62,7 @@ wget http://ftp.cn.debian.org/debian/pool/main/a/automake-1.16/automake_1.16.1-4
 Build:
 ```
 ./go trspk <version>               // If no version number is specified, the date will be used
+./go trspk rebuild <package>       // Rebuild a single package
 ```
 
 The generated image is located at:

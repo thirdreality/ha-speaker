@@ -12,11 +12,14 @@ Usage:
   ./go <target> [version]              Build natively
   ./go --docker <target> [version]     Build inside Docker container
   ./go --docker-shell                  Enter Docker container interactively
+  ./go <target> rebuild <package>       Rebuild a single package
+  ./go --docker <target> rebuild <package>  Rebuild a single package in Docker
   ./go -h, --help                      Show this help message
 
 Arguments:
   target      Build target name (e.g. trspk)
   version     Optional version string (default: date-based, e.g. 0.05.10)
+  package     Buildroot package name (e.g. sendspin-client, linux-voice-assistant)
 
 Examples:
   ./go trspk                           Native build with date-based version
@@ -24,6 +27,8 @@ Examples:
   ./go --docker trspk                  Docker build (no host deps required)
   ./go --docker trspk 1.2.3            Docker build with version 1.2.3
   ./go --docker-shell                  Debug inside the build container
+  ./go trspk rebuild sendspin-client   Rebuild sendspin-client package
+  ./go --docker trspk rebuild sendspin-client
 
 Output:
   image/<target>_<version>.img         Firmware image for USB burning
@@ -99,6 +104,19 @@ esac
 ROOT_DIR=$(pwd)
 BUILDROOT_DIR="${ROOT_DIR}/buildroot"
 BUILD_OUTPUT_DIR="${ROOT_DIR}/output"
+
+#--- Rebuild single package ---#
+if [ "$2" = "rebuild" ]; then
+    [ -z "$3" ] && ERROR "Missing package name! Usage: ./go <target> rebuild <package>"
+    TARGET_OUTPUT_DIR="${BUILD_OUTPUT_DIR}/3reality_${1}"
+    PKG="$3"
+    [ -d "${TARGET_OUTPUT_DIR}" ] || ERROR "Output dir not found: ${TARGET_OUTPUT_DIR}. Run a full build first."
+    cd "${BUILDROOT_DIR}"
+    INFO "Rebuilding package: ${PKG} (target: ${1})"
+    make O="${TARGET_OUTPUT_DIR}" "${PKG}-rebuild"
+    INFO "Package ${PKG} rebuilt successfully!"
+    exit 0
+fi
 TARGET_BUILD_CONFIG="3reality_${1}"
 TARGET_OUTPUT_DIR="${BUILD_OUTPUT_DIR}/${TARGET_BUILD_CONFIG}"
 TOOLCHAIN_DIR="${ROOT_DIR}/sources/toolchain"
