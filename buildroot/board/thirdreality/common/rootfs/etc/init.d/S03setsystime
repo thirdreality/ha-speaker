@@ -1,0 +1,29 @@
+#!/bin/sh
+# Set system clock to firmware build time on boot.
+# Devices without RTC battery start at 1970-01-01; this gives a sane
+# baseline so TLS certificates validate and NTP sync is faster.
+#
+# Only advances the clock: if current time is already later than the
+# build time (e.g. RTC kept time), this is a no-op.
+# Lexicographic comparison works because YYYYMMDDHHMM is fixed-width
+# zero-padded, so string order == chronological order.
+
+case "$1" in
+    start)
+        if [ -f /etc/build_timestamp ]; then
+            BUILD_TS=$(cat /etc/build_timestamp)
+            NOW_TS=$(date -u +%Y%m%d%H%M)
+            if [ -n "$BUILD_TS" ] && [ "$NOW_TS" \< "$BUILD_TS" ]; then
+                date -u -s "$BUILD_TS" >/dev/null
+            fi
+        fi
+        ;;
+    stop|restart|reload)
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|reload}" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

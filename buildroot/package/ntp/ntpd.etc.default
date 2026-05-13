@@ -1,5 +1,8 @@
 # NTP Servers to use for ntpdate
-NTPSERVERS="ntp.aliyun.com ntp.tencent.com cn.pool.ntp.org time.cloudflare.com time.google.com pool.ntp.org time.android.com"
+# IP servers: tried first for instant sync (no DNS delay)
+NTPSERVERS_IP="162.159.200.1 216.239.35.0 203.107.6.88 120.25.115.20"
+# Domain fallback: tried only if all IPs fail
+NTPSERVERS_DNS="pool.ntp.org time.cloudflare.com time.google.com time.apple.com"
 
 # Get initial time via ntpdate?
 NTPDATE=yes

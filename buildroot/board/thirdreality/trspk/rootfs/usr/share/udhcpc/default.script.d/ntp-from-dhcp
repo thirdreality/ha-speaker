@@ -1,0 +1,31 @@
+#!/bin/sh
+# Apply NTP servers from DHCP Option 42 (ntpsrv) when available.
+# Prepends DHCP-provided servers to the IP list so local NTP
+# is tried first, with the hardcoded servers as fallback.
+
+NTP_DEFAULT="/etc/default/ntpd"
+
+case "$1" in
+    bound|renew)
+        [ -z "$ntpsrv" ] && exit 0
+        [ -r "$NTP_DEFAULT" ] || exit 0
+
+        . "$NTP_DEFAULT"
+
+        # Build new list: DHCP servers first, then existing (deduped)
+        NEW_SERVERS="$ntpsrv"
+        for s in $NTPSERVERS_IP; do
+            case " $ntpsrv " in
+                *" $s "*) ;;  # already in DHCP list, skip
+                *) NEW_SERVERS="$NEW_SERVERS $s" ;;
+            esac
+        done
+
+        # Skip write if nothing changed (avoid unnecessary flash writes on renew)
+        case "$NTPSERVERS_IP" in
+            "$NEW_SERVERS") exit 0 ;;
+        esac
+
+        sed -i "s|^NTPSERVERS_IP=.*|NTPSERVERS_IP=\"$NEW_SERVERS\"|" "$NTP_DEFAULT"
+        ;;
+esac

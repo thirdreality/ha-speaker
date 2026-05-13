@@ -19,31 +19,30 @@ fi
 
 if [ -x $NTPDATE_BIN ] ; then
     while true ; do
-        $NTPDATE_BIN -v -b $NTPDATE_OPTS $NTPSERVERS > /dev/null 2>&1
-        if [ $? = 0 ]; then
-            echo -n "Getting initial time via ntp"
-            echo "ntpdate OK"
-
-            if [ ! -f /data/first_wifi_connected ]; then
-                touch /data/first_wifi_connected
-                paplay /usr/share/thirdreality/audio/ready_to_connect_ha.wav &
-            fi
-            /etc/init.d/S44bluetooth stop
-            /etc/init.d/S99ha-speaker voice-assistant start
-            /etc/init.d/S99ha-speaker sendspin-client start
-
-            /bin/date +%Y-%m-%d > /etc/last_date
-            #If the platform have RTC, we will write back to RTC HW
-            if [ -e /dev/rtc ] || [ -e /dev/misc/rtc ]; then
-                hwclock -w -u
-            fi
-            break;
-        else
-            #echo "ntpdate FAIL"
-            killall -9 ntpd > /dev/null 2>&1
-            sleep 1
-        fi
+        # Re-read config each iteration so DHCP Option 42 updates take effect
+        [ -r /etc/default/$NAME ] && . /etc/default/$NAME
+        # Try IP servers first (instant, no DNS)
+        $NTPDATE_BIN -b $NTPDATE_OPTS $NTPSERVERS_IP > /dev/null 2>&1 && break
+        # Fall back to domain name
+        $NTPDATE_BIN -b $NTPDATE_OPTS $NTPSERVERS_DNS > /dev/null 2>&1 && break
+        killall -9 ntpd > /dev/null 2>&1
+        sleep 1
     done
+
+    echo "ntpdate OK"
+
+    if [ ! -f /data/first_wifi_connected ]; then
+        touch /data/first_wifi_connected
+        paplay /usr/share/thirdreality/audio/ready_to_connect_ha.wav &
+    fi
+    /etc/init.d/S44bluetooth stop
+    /etc/init.d/S99ha-speaker voice-assistant start
+    /etc/init.d/S99ha-speaker sendspin-client start
+
+    #If the platform have RTC, we will write back to RTC HW
+    if [ -e /dev/rtc ] || [ -e /dev/rtc0 ] || [ -e /dev/misc/rtc ]; then
+        hwclock -w -u
+    fi
 fi
 
 echo -n "Starting $DESC: $NAME"
