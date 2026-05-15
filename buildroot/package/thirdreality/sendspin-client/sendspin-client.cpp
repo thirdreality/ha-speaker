@@ -350,7 +350,7 @@ int main(int argc, char *argv[]) {
   SendspinClient::set_log_level(log_level);
 
   SendspinClientConfig config;
-  config.client_id = "3rspk-sendspin";
+  config.client_id = friendly_name;
   config.name = friendly_name;
   config.product_name = "Voice & Music Assistant";
   config.manufacturer = "ThirdReality";
