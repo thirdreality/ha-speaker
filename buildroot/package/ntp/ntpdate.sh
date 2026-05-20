@@ -21,8 +21,9 @@ if [ -x $NTPDATE_BIN ] ; then
     while true ; do
         # Re-read config each iteration so DHCP Option 42 updates take effect
         [ -r /etc/default/$NAME ] && . /etc/default/$NAME
-        # Try IP servers first (instant, no DNS)
-        $NTPDATE_BIN -b $NTPDATE_OPTS $NTPSERVERS_IP > /dev/null 2>&1 && break
+        # DHCP-provided servers first (local, low latency), then hardcoded IPs.
+        # NTPSERVERS_DHCP may be empty; that's fine, ntpdate just skips it.
+        $NTPDATE_BIN -b $NTPDATE_OPTS $NTPSERVERS_DHCP $NTPSERVERS_IP > /dev/null 2>&1 && break
         # Fall back to domain name
         $NTPDATE_BIN -b $NTPDATE_OPTS $NTPSERVERS_DNS > /dev/null 2>&1 && break
         killall -9 ntpd > /dev/null 2>&1

@@ -1,31 +1,85 @@
 #!/bin/sh
 # Apply NTP servers from DHCP Option 42 (ntpsrv) when available.
-# Prepends DHCP-provided servers to the IP list so local NTP
-# is tried first, with the hardcoded servers as fallback.
+# Updates both:
+#   /etc/default/ntpd   — NTPSERVERS_DHCP used by ntpdate.sh (initial sync)
+#   /etc/ntp.conf       — server list used by the long-running ntpd daemon
+# DHCP servers are prepended so local NTP is tried first, with the
+# hardcoded public servers as fallback.
+#
+# Design notes:
+#   * NTPSERVERS_DHCP is owned exclusively by this hook. We OVERWRITE it on
+#     every lease (no accumulation), so moving between networks does not
+#     leave stale unreachable IPs that would slow down ntpdate. If the new
+#     lease has no Option 42, NTPSERVERS_DHCP is cleared to the empty
+#     string, falling back to the hardcoded NTPSERVERS_IP/NTPSERVERS_DNS.
+#   * /etc/ntp.conf is rewritten atomically (tmp + rename) so a concurrent
+#     ntpd start (from S49ntp/ntpdate.sh) cannot read a half-written file.
+#   * On first boot S49ntp has not started yet — letting it run first keeps
+#     port 123 free for ntpdate. We only restart ntpd when it is already
+#     running (i.e. config changed after initial sync), and we do it in the
+#     background so udhcpc's hook chain is not stalled by sleep+restart.
 
 NTP_DEFAULT="/etc/default/ntpd"
+NTP_CONF="/etc/ntp.conf"
+# Public fallback servers (keep in sync with /etc/ntp.conf template).
+NTP_FALLBACK="pool.ntp.org time.cloudflare.com time.google.com time.apple.com"
 
 case "$1" in
     bound|renew)
-        [ -z "$ntpsrv" ] && exit 0
         [ -r "$NTP_DEFAULT" ] || exit 0
 
         . "$NTP_DEFAULT"
 
-        # Build new list: DHCP servers first, then existing (deduped)
-        NEW_SERVERS="$ntpsrv"
-        for s in $NTPSERVERS_IP; do
-            case " $ntpsrv " in
-                *" $s "*) ;;  # already in DHCP list, skip
-                *) NEW_SERVERS="$NEW_SERVERS $s" ;;
-            esac
-        done
-
-        # Skip write if nothing changed (avoid unnecessary flash writes on renew)
-        case "$NTPSERVERS_IP" in
-            "$NEW_SERVERS") exit 0 ;;
+        # Skip if DHCP-provided server set is unchanged (avoid flash writes
+        # and ntpd restarts on every renew). Handles the empty-empty case
+        # too: if ntpsrv is empty and we never had any DHCP servers, exit.
+        case "$NTPSERVERS_DHCP" in
+            "$ntpsrv") exit 0 ;;
         esac
 
-        sed -i "s|^NTPSERVERS_IP=.*|NTPSERVERS_IP=\"$NEW_SERVERS\"|" "$NTP_DEFAULT"
+        # Overwrite NTPSERVERS_DHCP with the new value (may be empty if the
+        # current network's DHCP server doesn't provide Option 42; that's
+        # the correct outcome — we must not keep stale IPs from the old
+        # network). Use a different sed delimiter (|) since IPs can't
+        # contain it. If the line is missing (older config), append.
+        if grep -q '^NTPSERVERS_DHCP=' "$NTP_DEFAULT"; then
+            sed -i "s|^NTPSERVERS_DHCP=.*|NTPSERVERS_DHCP=\"$ntpsrv\"|" "$NTP_DEFAULT"
+        else
+            echo "NTPSERVERS_DHCP=\"$ntpsrv\"" >> "$NTP_DEFAULT"
+        fi
+
+        # Regenerate ntp.conf atomically so the long-running ntpd uses DHCP
+        # servers. Atomic rename(2) prevents a concurrent ntpd start from
+        # reading a half-written file.
+        {
+            echo "driftfile /var/lib/ntp/ntp.drift"
+            echo ""
+            echo "restrict default nomodify nopeer noquery limited kod"
+            echo "restrict 127.0.0.1"
+            echo "restrict ::1"
+            echo ""
+            # DHCP-provided servers first (local, low latency)
+            for s in $ntpsrv; do
+                echo "server $s iburst"
+            done
+            # Public fallback
+            for s in $NTP_FALLBACK; do
+                echo "server $s iburst"
+            done
+        } > "$NTP_CONF.tmp" && mv "$NTP_CONF.tmp" "$NTP_CONF"
+
+        # Only restart ntpd if it's already running. On first boot, S49ntp
+        # owns the lifecycle and will pick up the new ntp.conf when it
+        # eventually starts ntpd. Run the restart in the background so the
+        # udhcpc hook chain is not blocked by the kill/sleep/start sequence
+        # (other hooks like disable-wifi-powersave run after this one).
+        if pidof ntpd > /dev/null 2>&1; then
+            (
+                start-stop-daemon -K -q -n ntpd 2>/dev/null
+                # Wait for socket to free; ntpd ignores SIGHUP so we re-exec it.
+                sleep 1
+                start-stop-daemon -S -b -q -x /usr/sbin/ntpd -- -g
+            ) &
+        fi
         ;;
 esac
