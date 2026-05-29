@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <signal.h>  // sigaction, SA_RESTART, sigemptyset (POSIX, not in <csignal>)
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -184,11 +185,19 @@ class PulsePlayerListener : public PlayerRoleListener {
         if (params.channels.has_value()) ss.channels = static_cast<uint8_t>(params.channels.value());
       }
 
-      // Use small buffer to get tight pacing from pa_simple_write blocking.
-      // prebuf=0: start playback immediately (no buffering delay).
-      // tlength: target buffer length ~50ms — controls when write blocks.
+      // Buffer sizing: align with the library's AUDIO_WRITE_TIMEOUT_MS=20ms.
+      // sendspin-cpp's sync_task calls on_audio_write() with that timeout and
+      // expects the call to either return (with bytes written) or be re-driven
+      // promptly so it can keep up with the server clock. With pa_simple_write
+      // being fully blocking, the worst-case stall is bounded by tlength: a
+      // 50ms target buffer means worst-case ~50ms blocking per call, well
+      // beyond the 20ms budget and likely to trip HARD_SYNC_THRESHOLD_US=5ms
+      // when PA jitter stacks on top. Setting tlength=20ms keeps the blocking
+      // window aligned with the library's expectation. maxlength stays at
+      // 2*tlength to absorb short scheduling hiccups without triggering an
+      // immediate underrun.
       uint32_t bytes_per_frame = pa_frame_size(&ss);
-      uint32_t tlength_bytes = ss.rate * bytes_per_frame * 50 / 1000;  // 50ms
+      uint32_t tlength_bytes = ss.rate * bytes_per_frame * 20 / 1000;  // 20ms
 
       pa_buffer_attr ba;
       ba.maxlength = tlength_bytes * 2;
@@ -292,7 +301,7 @@ class PulsePlayerListener : public PlayerRoleListener {
   // by a fresh stream/start, and our on_stream_start() above flushes PA in
   // place when the format matches, which covers the audible boundary. A pure
   // stream/clear with no following stream/start would leak up to ~tlength
-  // (50ms) of buffered PCM from PA, which is below the perceptual threshold
+  // (20ms) of buffered PCM from PA, which is below the perceptual threshold
   // for a seek transition.
 
   // Server-pushed volume change. Wire format is 0-100 percent against MA 2.8.7
@@ -424,10 +433,39 @@ int main(int argc, char *argv[]) {
   }
   if (optind < argc) friendly_name = argv[optind];
 
-  signal(SIGINT, signal_handler);
-  signal(SIGTERM, signal_handler);
-  signal(SIGUSR1, sigusr1_handler);
-  signal(SIGUSR2, sigusr2_handler);
+  // Signal handler policy:
+  //
+  //   SIGUSR1 / SIGUSR2 (ducking)  → SA_RESTART
+  //     voice-assistant sends these mid-playback to toggle ducking. We must
+  //     NOT let them tear down an in-flight pa_simple_write — that would
+  //     return EINTR, force a close+reopen of the PA stream, and produce an
+  //     audible glitch at every TTS boundary. With SA_RESTART, the underlying
+  //     write(2) restarts transparently and the duck flag is consumed on the
+  //     next on_audio_write() iteration.
+  //
+  //   SIGINT / SIGTERM (quit)      → no SA_RESTART
+  //     We want these to interrupt blocking syscalls immediately so the main
+  //     loop reaches its g_running check on the next iteration, regardless of
+  //     whether we were stuck in pa_simple_write or sleep_for. start-stop-
+  //     daemon retries TERM for 30s before escalating to KILL, so a small
+  //     residual delay isn't fatal — but no reason to add one.
+  //
+  //   sigemptyset(&sa_mask) is required: zero-initialization of struct
+  //   sigaction does NOT guarantee an empty signal mask on all libcs.
+  struct sigaction sa_quit{};
+  sigemptyset(&sa_quit.sa_mask);
+  sa_quit.sa_flags = 0;
+  sa_quit.sa_handler = signal_handler;
+  sigaction(SIGINT, &sa_quit, nullptr);
+  sigaction(SIGTERM, &sa_quit, nullptr);
+
+  struct sigaction sa_duck{};
+  sigemptyset(&sa_duck.sa_mask);
+  sa_duck.sa_flags = SA_RESTART;
+  sa_duck.sa_handler = sigusr1_handler;
+  sigaction(SIGUSR1, &sa_duck, nullptr);
+  sa_duck.sa_handler = sigusr2_handler;
+  sigaction(SIGUSR2, &sa_duck, nullptr);
 
   SendspinClient::set_log_level(log_level);
 
