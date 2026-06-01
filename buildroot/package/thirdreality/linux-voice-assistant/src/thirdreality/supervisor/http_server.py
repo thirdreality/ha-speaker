@@ -221,7 +221,7 @@ class SupervisorHTTPServer:
 
         device_info = get_device_info()
         return {
-            "connected": device_info.get("status", "") == "connected",
+            "connected": device_info.get("status", "") in ("connected", "connected_no_internet"),
             "ssid": device_info.get("ssid", ""),
             "ip_address": device_info.get("ip", ""),
             "mac_address": device_info.get("macAddress", ""),
@@ -235,7 +235,7 @@ class SupervisorHTTPServer:
         return {
             "Device Model": "ThirdReality HA Speaker",
             "Device Name": device_info.get("name", ""),
-            "WIFI Connected": device_info.get("status", "") == "connected",
+            "WIFI Connected": device_info.get("status", "") in ("connected", "connected_no_internet"),
             "SSID": device_info.get("ssid", ""),
             "Ip Address": device_info.get("ip", ""),
             "Mac Address": device_info.get("macAddress", ""),
