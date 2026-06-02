@@ -10,7 +10,7 @@
 #
 ################################################################################
 
-PYTHON_PYMICRO_WAKEWORD_VERSION = v2.1.0
+PYTHON_PYMICRO_WAKEWORD_VERSION = v2.2.1
 PYTHON_PYMICRO_WAKEWORD_SITE = https://github.com/OHF-Voice/pymicro-wakeword.git
 PYTHON_PYMICRO_WAKEWORD_SITE_METHOD = git
 

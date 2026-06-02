@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Tue, 2 Jun 2026 03:35:00 +0000
+Subject: [PATCH] Pick quantization numpy dtype from TfLiteTensorType
+
+Upstream pymicro-wakeword (through v2.2.1) hardcodes np.uint8 for both
+input quantization and output dequantization. Every microWakeWord
+model — including the okay_nabu / hey_jarvis / alexa / hey_mycroft
+models pymicro-wakeword itself ships, and the ones we bundle in this
+firmware — actually has INT8 input and UINT8 output.
+
+Reading int8 bytes back as uint8 silently shifts every value by
+128 * scale, so inference produces nonsense probabilities. The model
+loads fine, the wrapper reports it as active, but detection never
+fires regardless of the configured probability_cutoff.
+
+Detect input/output dtype at load time via TfLiteTensorType and use
+the matching numpy dtype when packing/unpacking the tensor buffers.
+The C-API binding for TfLiteTensorType is already declared in the
+base class (wakeword.py) so no additional ctypes glue is needed.
+
+The mapping is intentionally small: only the two quantized dtypes
+microWakeWord models are exported with (uint8 / int8). Anything else
+raises so a future quantization scheme surfaces immediately rather
+than silently miscomputing.
+
+---
+--- a/pymicro_wakeword/microwakeword.py
++++ b/pymicro_wakeword/microwakeword.py
+@@ -27,6 +27,17 @@
+ BYTES_PER_CHUNK = SAMPLES_PER_CHUNK * BYTES_PER_SAMPLE
+ SECONDS_PER_CHUNK = SAMPLES_PER_CHUNK / SAMPLES_PER_SECOND
+ DEFAULT_STRIDE = 3
++
++# TfLiteType enum values from tensorflow/lite/c/c_api_types.h. Stable across
++# TFLite versions; we only need the two quantized dtypes microWakeWord models
++# are ever exported with.
++_TFLITE_TYPE_UINT8 = 3
++_TFLITE_TYPE_INT8 = 9
++
++_TFLITE_TYPE_TO_NP = {
++    _TFLITE_TYPE_UINT8: np.uint8,
++    _TFLITE_TYPE_INT8: np.int8,
++}
+ 
+ 
+ class MicroWakeWord(TfLiteWakeWord):
+@@ -110,6 +121,20 @@
+         self.input_scale, self.input_zero_point = input_q.scale, input_q.zero_point
+         self.output_scale, self.output_zero_point = output_q.scale, output_q.zero_point
+ 
++        # Pick numpy dtypes from the actual quantized tensor types so we work
++        # with both uint8 and int8 quantized models. Reading the byte buffer
++        # with the wrong sign is a silent failure at inference time.
++        in_type = self.lib.TfLiteTensorType(self.input_tensor)
++        out_type = self.lib.TfLiteTensorType(self.output_tensor)
++        self._input_np_dtype = _TFLITE_TYPE_TO_NP.get(in_type)
++        self._output_np_dtype = _TFLITE_TYPE_TO_NP.get(out_type)
++        if self._input_np_dtype is None or self._output_np_dtype is None:
++            raise ValueError(
++                "Unsupported microWakeWord quantization "
++                f"(input TfLiteType={in_type}, output TfLiteType={out_type}); "
++                "expected uint8 (3) or int8 (9)"
++            )
++
+     def close(self) -> None:
+         """Release resources."""
+         if self.interpreter:
+@@ -204,7 +229,7 @@
+         quant_features = np.round(
+             np.concatenate(self._features, axis=1) / self.input_scale
+             + self.input_zero_point
+-        ).astype(np.uint8)
++        ).astype(self._input_np_dtype)
+ 
+         # Stride instead of rolling
+         self._features.clear()
+@@ -220,7 +245,7 @@
+ 
+         # Read output
+         output_bytes = self.lib.TfLiteTensorByteSize(self.output_tensor)
+-        output_data = np.empty(output_bytes, dtype=np.uint8)
++        output_data = np.empty(output_bytes, dtype=self._output_np_dtype)
+         self.lib.TfLiteTensorCopyToBuffer(
+             self.output_tensor,
+             output_data.ctypes.data_as(ctypes.c_void_p),
+-- 
+2.43.0
