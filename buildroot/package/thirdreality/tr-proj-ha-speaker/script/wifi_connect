@@ -135,14 +135,43 @@ wifi_connect()
 {
     local ssid="$1"
     local psk="$2"
+    local hidden="$3"
 
     echo "Connecting to SSID: $ssid"
 
-    local type=$(detect_wifi_type "$ssid")
-    echo "Detected WiFi type: $type"
+    local type
+    if [ "$hidden" = "1" ]; then
+        # Hidden APs do not appear in passive scan results, so flags
+        # cannot be read. Assume WPA2-PSK when a passphrase is given,
+        # otherwise an open network — matches the existing fallback
+        # in the "unknown" branch below.
+        if [ -z "$psk" ]; then
+            type="open"
+        else
+            type="wpa2-psk"
+        fi
+        echo "Hidden SSID: assuming WiFi type: $type"
+    else
+        type=$(detect_wifi_type "$ssid")
+        echo "Detected WiFi type: $type"
+    fi
 
     id=$(wpa_cli -i wlan0 add_network)
     wpa_cli -i wlan0 set_network "$id" ssid "\"$ssid\""
+
+    # Always enable directed-probe scanning for saved networks. This
+    # serves two purposes:
+    #   1. Associates with APs that don't broadcast their SSID at
+    #      provisioning time (the $hidden=1 path above).
+    #   2. Keeps the connection working if the user later flips the
+    #      AP to "hide SSID" — without scan_ssid, wpa_supplicant
+    #      would only do passive scans on reconnect and never see
+    #      the network again.
+    # Tradeoff: one extra directed probe request per scan cycle.
+    # Negligible vs. the alternative of silent reconnect failure.
+    # This matches how Android / NetworkManager / iOS treat saved
+    # networks by default.
+    wpa_cli -i wlan0 set_network "$id" scan_ssid 1
 
     case "$type" in
         open)
@@ -328,15 +357,21 @@ wifi()
     local ssid=$1
     local psk=$2
     local connected=0
+    local hidden=0
 
     wpa_cli scan > /dev/null
     sleep 2
-    scan_result_exists "$ssid" || {
-        echo "SSID not found: $ssid"
-        update_network_info "disconnected" "" ""
-        sync
-        exit 10
-    }
+    if ! scan_result_exists "$ssid"; then
+        # SSID not in scan results. Could be:
+        #   - a hidden AP (no SSID broadcast in beacons)
+        #   - a 5 GHz-only AP (this device is 2.4 GHz only)
+        #   - a wrong SSID
+        # Assume hidden and let wpa_supplicant try a directed probe.
+        # If the AP genuinely doesn't exist, the connect loop below
+        # will time out and return 13.
+        echo "SSID '$ssid' not in scan results, assuming hidden network"
+        hidden=1
+    fi
 
     if wpa_cli -i wlan0 status | grep -iq completed; then
         switch_wifi=1
@@ -344,7 +379,7 @@ wifi()
         sleep 1
     fi
 
-    wifi_connect "$ssid" "$psk"
+    wifi_connect "$ssid" "$psk" "$hidden"
 
     local cnt=0
     while [ $cnt -lt 10 ]
@@ -379,7 +414,9 @@ esac
 
 # return codes:
 # 0 - success
-# 10 - ssid not found, only supports 2.4G wifi
+# 10 - (deprecated) ssid not found in scan results; the script now
+#      treats this case as a possibly-hidden SSID and falls through
+#      to the normal connect path
 # 11 - wpa cli command failed to execute
 # 12 - failed to get valid ip address
 # 13 - failed to connect to the ssid
