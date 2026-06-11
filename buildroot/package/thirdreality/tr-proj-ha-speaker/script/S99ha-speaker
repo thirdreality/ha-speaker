@@ -4,7 +4,7 @@
 #
 # Manages:
 #   - netmonitor       (WiFi/internet connectivity state machine)
-#   - voice-assistant  (python3 -m linux_voice_assistant)
+#   - voice-assistant  (/usr/bin/linux-voice-assistant-cpp)
 #   - sendspin-client  (music streaming)
 #   - pulseaudio       (reboot device if it dies)
 #
@@ -69,11 +69,9 @@ start_voice_assistant() {
     rm -f "$VOICE_PIDFILE" "$DISABLE_VOICE"
     local spk_name
     spk_name=$(jq -r '.device.name // "thirdreality-speaker"' "$DEVICE_CONF")
-    python3 -m linux_voice_assistant \
+    /usr/bin/linux-voice-assistant-cpp \
         --name "$spk_name" \
-        --wake-model "okay_nabu" \
-        --preferences-file "/data/conf/sound.json" \
-        --network-interface wlan0 &
+        --port 6053 &
     echo $! > "$VOICE_PIDFILE"
 }
 
