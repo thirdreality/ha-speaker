@@ -98,7 +98,7 @@ void WebRtcProcessor::RebuildLocked() {
     apm_ = apm;
 }
 
-bool WebRtcProcessor::ProcessReverse(const std::int16_t* buf,
+bool WebRtcProcessor::ProcessReverse(std::int16_t* buf,
                                      std::size_t n) {
     std::lock_guard<std::mutex> lk(apm_mutex_);
     if (apm_ == nullptr) return false;
@@ -110,10 +110,9 @@ bool WebRtcProcessor::ProcessReverse(const std::int16_t* buf,
         return false;
     }
     auto* apm = static_cast<::webrtc::AudioProcessing*>(apm_);
-    std::int16_t* p = const_cast<std::int16_t*>(buf);
     for (std::size_t off = 0; off < n; off += kFrameSamples) {
         const int err = apm->ProcessReverseStream(
-            p + off, *stream_cfg_, *stream_cfg_, p + off);
+            buf + off, *stream_cfg_, *stream_cfg_, buf + off);
         if (err != ::webrtc::AudioProcessing::kNoError) {
             LVA_LOGE(kTag, "ProcessReverseStream failed: %d", err);
             return false;

@@ -24,7 +24,7 @@ class WebRtcProcessor {
 
     bool Process(std::int16_t* buf, std::size_t n);
 
-    bool ProcessReverse(const std::int16_t* buf, std::size_t n);
+    bool ProcessReverse(std::int16_t* buf, std::size_t n);
 
     // Reset the echo canceller (rebuild the APM) so it re-converges
     // from a clean state. Call after an ALSA xrun/recover, where the
