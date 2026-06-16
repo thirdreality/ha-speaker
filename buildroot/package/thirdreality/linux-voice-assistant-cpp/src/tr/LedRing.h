@@ -15,4 +15,7 @@ enum class LedState {
 
 void Show(LedState state);
 
+// Brief volume-changed LED feedback (non-blocking fork of dbus-send).
+void ShowVolumeChanged();
+
 }  // namespace lva::tr

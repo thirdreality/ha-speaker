@@ -53,7 +53,7 @@ LibMpvPlayer::LibMpvPlayer(const Options& opts) {
     // Network playback cache. Matches the python-mpv build's tunings.
     SetMpvOptionString(mpv_, "cache",                "yes");
     SetMpvOptionString(mpv_, "cache-pause",          "yes");
-    SetMpvOptionString(mpv_, "cache-pause-wait",     "1");
+    SetMpvOptionString(mpv_, "cache-pause-wait",     "10");
     SetMpvOptionString(mpv_, "demuxer-max-bytes",    "2MiB");
     SetMpvOptionString(mpv_, "demuxer-max-back-bytes", "512KiB");
     {
@@ -159,11 +159,6 @@ void LibMpvPlayer::DrainEvents() {
             case MPV_EVENT_FILE_LOADED:
                 set_state(PlayerState::kPlaying);
                 LVA_LOGD(kTag, "event: FILE_LOADED");
-                {
-                    double percent = user_volume_ * 100.0;
-                    mpv_set_property(mpv_, "volume",
-                                     MPV_FORMAT_DOUBLE, &percent);
-                }
                 break;
             case MPV_EVENT_END_FILE: {
                 auto* end = static_cast<mpv_event_end_file*>(ev->data);

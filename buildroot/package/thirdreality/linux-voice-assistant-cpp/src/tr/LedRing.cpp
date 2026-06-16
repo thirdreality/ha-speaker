@@ -95,4 +95,42 @@ void Show(LedState state) {
     LVA_LOGD(kTag, "show '%s' (pid=%d)", anim_name, (int)pid);
 }
 
+void ShowVolumeChanged() {
+    std::string anim_path =
+        std::string(kAnimDir) + "volume-changed.animation";
+    std::string array_arg = std::string("array:string:") + anim_path;
+
+    char prog[]    = "/usr/bin/dbus-send";
+    char system_a[]= "--system";
+    char type_a[]  = "--type=signal";
+    char path_a[]  = "/com/3r/EventBus";
+    char iface_a[] = "com._3reality.EventBus.LedShow";
+    char to_idle[] = "boolean:false";
+    std::string array_buf = array_arg;
+
+    char* argv[] = {
+        prog, system_a, type_a, path_a, iface_a,
+        to_idle, array_buf.data(), nullptr,
+    };
+
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDIN_FILENO,
+                                     "/dev/null", O_RDONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO,
+                                     "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO,
+                                     "/dev/null", O_WRONLY, 0);
+
+    pid_t pid = 0;
+    const int rc = ::posix_spawn(&pid, prog, &actions, nullptr,
+                                 argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (rc != 0) {
+        LVA_LOGW(kTag, "posix_spawn failed: %s", std::strerror(rc));
+        return;
+    }
+    LVA_LOGD(kTag, "show 'volume-changed' (pid=%d)", (int)pid);
+}
+
 }  // namespace lva::tr

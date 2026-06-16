@@ -11,6 +11,7 @@
 #include "entities/MediaPlayerEntity.h"
 #include "entities/MuteSwitchEntity.h"
 #include "satellite/Satellite.h"
+#include "tr/LedRing.h"
 #include "tr/MicMuteGpio.h"
 #include "tr/SystemVolume.h"
 #include "util/Log.h"
@@ -40,6 +41,7 @@ void ServerState::PersistVolume(double new_volume) {
     volume.store(clamped, std::memory_order_relaxed);
     preferences.volume = clamped;
     lva::tr::SetSystemVolume(static_cast<int>(clamped * 100.0 + 0.5));
+    lva::tr::ShowVolumeChanged();
     if (media_player_entity != nullptr) {
         media_player_entity->BroadcastState();
     }
