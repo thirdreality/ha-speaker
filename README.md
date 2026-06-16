@@ -7,10 +7,20 @@
 ThirdReality Voice&Music Assistant is an open-source speaker that supports connecting to the Home Assistant Voice Assistant and Music Assistant. You need to have a device running Home Assistant in order to use this speaker. If you do not have Home Assistant installed yet, refer to the [installation documentation](https://www.home-assistant.io/installation/) for instructions. [Buy it on ThirdReality Shop](https://thirdreality.com/product/voice-music-assistant-dev-edition/)
 
 
+## Architecture
+
+The firmware consists of two main application components:
+
+- **Voice** — built on [linux-voice-assistant-cpp](buildroot/package/thirdreality/linux-voice-assistant-cpp/), a C++ rewrite of [OHF-Voice/linux-voice-assistant](https://github.com/OHF-Voice/linux-voice-assistant.git). Implements the ESPHome native API so Home Assistant discovers the speaker as a voice satellite. See its [README](buildroot/package/thirdreality/linux-voice-assistant-cpp/README.md) for details.
+- **Music** — built on [Sendspin](https://www.sendspin-audio.com/), a lightweight streaming protocol integrated with [Music Assistant](https://www.music-assistant.io/).
+
+---
+
 - [Voice\&Music Assistant](#voicemusic-assistant)
+  - [Architecture](#architecture)
   - [Build](#build)
-    - [Native Build](#native-build)
     - [Docker Build](#docker-build)
+    - [Native Build](#native-build)
   - [Flash](#flash)
   - [Serial debugging](#serial-debugging)
   - [Setup the voice assist](#setup-the-voice-assist)
@@ -27,7 +37,7 @@ ThirdReality Voice&Music Assistant is an open-source speaker that supports conne
 ## Build
 
 Clone the repository:
-```
+```bash
 git clone https://github.com/thirdreality/voice-music-assistant.git
 cd <YOUR PATH>/voice-music-assistant
 git submodule update --init
@@ -37,10 +47,10 @@ git submodule update --init
 
 No host dependencies required other than Docker.
 
-```
-./go --docker trspk <version>        // Build inside Docker (recommended)
-./go --docker-shell                  // Enter container interactively for debugging
-./go --docker trspk rebuild <package>  // Rebuild a single package in Docker
+```bash
+./go --docker trspk <version>          # Build inside Docker (recommended)
+./go --docker-shell                    # Enter container interactively for debugging
+./go --docker trspk rebuild <package>  # Rebuild a single package in Docker
 ```
 
 ### Native Build
@@ -49,7 +59,7 @@ Requires:
   - Ubuntu 20.04
 
 Install dependencies:
-```
+```bash
 sudo apt-get update
 
 sudo apt-get install -y build-essential bash bc binutils build-essential bzip2 cpio g++ gcc git gzip locales libncurses5-dev libdevmapper-dev libsystemd-dev make mercurial whois patch perl python rsync sed tar vim unzip wget bison flex libssl-dev libc6:i386 libncurses5:i386 libstdc++6:i386 zlib1g-dev:i386 zip python3-pip pkg-config automake gsettings-ubuntu-schemas libglib2.0-dev gcc-multilib g++-multilib
@@ -60,9 +70,9 @@ wget http://ftp.cn.debian.org/debian/pool/main/a/automake-1.16/automake_1.16.1-4
 ```
 
 Build:
-```
-./go trspk <version>               // If no version number is specified, the date will be used
-./go trspk rebuild <package>       // Rebuild a single package
+```bash
+./go trspk <version>               # If no version number is specified, the date will be used
+./go trspk rebuild <package>       # Rebuild a single package
 ```
 
 The generated image is located at:
@@ -250,7 +260,7 @@ Finally, select a song and the speaker, and you can start playback! 🎵
 
 ## Multi-Room Music
 
-official documentation: https://www.music-assistant.io/faq/groups/#groups
+Official documentation: https://www.music-assistant.io/faq/groups/#groups
 
 We use [Sendspin](https://www.sendspin-audio.com/) as the playback protocol, so it can work with any device that supports AirPlay.
 
