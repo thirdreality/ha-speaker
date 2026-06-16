@@ -60,8 +60,9 @@ namespace {
 constexpr const char* kTag = "main";
 constexpr const char* kVersion = "0.0.1";
 
-constexpr double kDefaultWakeSensitivity = 0.7;
-constexpr double kDefaultStopSensitivity = 0.5;
+constexpr double kDefaultMicroWakeSensitivity = 0.85;
+constexpr double kDefaultOpenWakeSensitivity  = 0.5;
+constexpr double kDefaultStopSensitivity      = 0.5;
 
 std::atomic<int> g_shutdown_signal{0};
 lva::proto::ApiServer* g_server = nullptr;
@@ -397,9 +398,12 @@ int main(int argc, char** argv) {
             .max_value     = 1.0,
             .step          = 0.001,
             .mode_enum     = 1,  // BOX
-            .getter        = [&state] {
+            .getter        = [&state, use_openwakeword] {
+                const double fallback = use_openwakeword
+                    ? kDefaultOpenWakeSensitivity
+                    : kDefaultMicroWakeSensitivity;
                 return state.preferences.wake_word_1_sensitivity.value_or(
-                    kDefaultWakeSensitivity);
+                    fallback);
             },
             .setter        = [&state](double v) {
                 state.PersistWakeWordSensitivity(1, v);
@@ -416,9 +420,12 @@ int main(int argc, char** argv) {
             .max_value     = 1.0,
             .step          = 0.001,
             .mode_enum     = 1,
-            .getter        = [&state] {
+            .getter        = [&state, use_openwakeword] {
+                const double fallback = use_openwakeword
+                    ? kDefaultOpenWakeSensitivity
+                    : kDefaultMicroWakeSensitivity;
                 return state.preferences.wake_word_2_sensitivity.value_or(
-                    kDefaultWakeSensitivity);
+                    fallback);
             },
             .setter        = [&state](double v) {
                 state.PersistWakeWordSensitivity(2, v);
