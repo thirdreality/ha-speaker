@@ -14,7 +14,7 @@ namespace lva::entities {
 namespace {
 
 constexpr const char* kTag         = "media";
-constexpr const char* kObjectId    = "media_player";
+constexpr const char* kObjectId    = "linux_voice_assistant_media_player";
 constexpr const char* kDisplayName = "Media Player";
 
 constexpr std::uint32_t kFeatureFlags =

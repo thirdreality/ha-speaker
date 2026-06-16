@@ -257,6 +257,9 @@ int main(int argc, char** argv) {
     if (state.mac_address.empty()) {
         state.mac_address = ReadMacFromDeviceJson("/data/conf/device.json");
     }
+    std::transform(state.mac_address.begin(), state.mac_address.end(),
+                   state.mac_address.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
     state.preferences_path = cli.preferences_file;
     const bool use_openwakeword = (cli.wakeword_type == "open");
     const std::filesystem::path wakeword_dir = use_openwakeword
@@ -376,7 +379,14 @@ int main(int argc, char** argv) {
     state.announce_player  = announce_player.get();
     state.music_player     = music_player.get();
 
-    std::uint32_t next_key = 1;
+    std::uint32_t next_key = 0;
+
+    {
+        auto media = std::make_unique<lva::entities::MediaPlayerEntity>(
+            next_key++, state, music_player.get());
+        state.media_player_entity = media.get();
+        state.entities.push_back(std::move(media));
+    }
 
     {
         auto mute = std::make_unique<lva::entities::MuteSwitchEntity>(
@@ -469,24 +479,6 @@ int main(int argc, char** argv) {
             },
         }));
 
-    state.entities.push_back(std::make_unique<lva::entities::NumberEntity>(
-        next_key++,
-        lva::entities::NumberEntity::Config{
-            .object_id     = "mic_volume",
-            .display_name  = "Mic Volume",
-            .icon          = "mdi:microphone-settings",
-            .min_value     = 1.0,
-            .max_value     = 100.0,
-            .step          = 1.0,
-            .mode_enum     = 0,  // AUTO
-            .getter        = [&state] {
-                return static_cast<double>(state.preferences.mic_volume);
-            },
-            .setter        = [&state](double v) {
-                state.PersistMicVolume(static_cast<int>(v));
-            },
-        }));
-
     // Mic noise suppression: 5-level select. Maps label ↔ int 0..4.
     {
         static const std::vector<std::string> kNoiseOptions = {
@@ -512,19 +504,29 @@ int main(int argc, char** argv) {
                             return;
                         }
                     }
-                    // Unknown label — keep current value, just log.
                     LVA_LOGW(kTag, "mic_noise: unknown label '%s'",
                              label.c_str());
                 },
             }));
     }
 
-    {
-        auto media = std::make_unique<lva::entities::MediaPlayerEntity>(
-            next_key++, state, music_player.get());
-        state.media_player_entity = media.get();
-        state.entities.push_back(std::move(media));
-    }
+    state.entities.push_back(std::make_unique<lva::entities::NumberEntity>(
+        next_key++,
+        lva::entities::NumberEntity::Config{
+            .object_id     = "mic_volume",
+            .display_name  = "Mic Volume",
+            .icon          = "mdi:microphone-settings",
+            .min_value     = 1.0,
+            .max_value     = 100.0,
+            .step          = 1.0,
+            .mode_enum     = 0,  // AUTO
+            .getter        = [&state] {
+                return static_cast<double>(state.preferences.mic_volume);
+            },
+            .setter        = [&state](double v) {
+                state.PersistMicVolume(static_cast<int>(v));
+            },
+        }));
 
     const std::uint32_t home_button_entity_key = next_key++;
     state.entities.push_back(std::make_unique<lva::entities::EventEntity>(
