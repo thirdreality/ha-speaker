@@ -26,8 +26,11 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <fcntl.h>
 #include <fstream>
+#include <linux/input.h>
 #include <mutex>
+#include <poll.h>
 #include <signal.h>
 #include <string>
 #include <thread>
@@ -37,9 +40,77 @@ using namespace sendspin;
 
 static std::atomic<bool> g_running{true};
 static std::atomic<bool> g_ducked{false};
+static std::atomic<int> g_tap_action{0};  // 0=none, 1=single tap, 2=double tap
 static void signal_handler(int) { g_running = false; }
 static void sigusr1_handler(int) { g_ducked = true; }
 static void sigusr2_handler(int) { g_ducked = false; }
+
+// ============================================================================
+// Input monitor — detects single/double tap on the Tap key
+// ============================================================================
+
+class InputMonitor {
+ public:
+  InputMonitor(const char *device, int keycode, std::atomic<int> &action)
+      : device_(device), keycode_(keycode), action_(action) {}
+
+  ~InputMonitor() { stop(); }
+
+  void start() {
+    thread_ = std::thread([this] { run(); });
+  }
+
+  void stop() {
+    running_ = false;
+    if (thread_.joinable()) thread_.join();
+  }
+
+ private:
+  void run() {
+    int fd = open(device_, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+      fprintf(stderr, "[sendspin] input open(%s) failed\n", device_);
+      return;
+    }
+
+    int count = 0;
+    int64_t last_release = 0;
+    constexpr int64_t kWindowUs = 350000;  // 350ms multi-tap window
+
+    while (running_) {
+      struct pollfd pfd{fd, POLLIN, 0};
+      int ret = poll(&pfd, 1, 100);
+      if (ret <= 0) {
+        // Timeout: flush pending taps if window expired
+        if (count > 0 && (now_us() - last_release) > kWindowUs) {
+          action_.store(count > 1 ? 2 : 1);
+          count = 0;
+        }
+        continue;
+      }
+
+      struct input_event ev;
+      if (read(fd, &ev, sizeof(ev)) != sizeof(ev)) continue;
+      if (ev.type != EV_KEY || ev.code != keycode_ || ev.value != 0) continue;
+
+      // Key release detected
+      count++;
+      last_release = now_us();
+    }
+    close(fd);
+  }
+
+  static int64_t now_us() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
+
+  const char *device_;
+  int keycode_;
+  std::atomic<int> &action_;
+  std::atomic<bool> running_{true};
+  std::thread thread_;
+};
 
 static constexpr const char *SOUND_CONF = "/data/conf/sound.json";
 static constexpr const char *SENDSPIN_CONF = "/data/conf/sendspin.json";
@@ -114,10 +185,24 @@ static int64_t now_us() {
 class FilePersistenceProvider : public SendspinPersistenceProvider {
  public:
   FilePersistenceProvider() {
+    // Ensure all required fields exist in config file
     std::ifstream test(SENDSPIN_CONF);
     if (!test) {
       std::ofstream out(SENDSPIN_CONF, std::ios::trunc);
-      out << "{\n  \"last_server_hash\": 0,\n  \"static_delay_ms\": 0\n}\n";
+      out << "{\n  \"last_server_hash\": 0,\n  \"static_delay_ms\": 0,\n  \"led_disabled\": 0\n}\n";
+    } else {
+      // Check if led_disabled field exists, add it if missing
+      std::string content((std::istreambuf_iterator<char>(test)),
+                          std::istreambuf_iterator<char>());
+      test.close();
+      if (content.find("\"led_disabled\"") == std::string::npos) {
+        auto pos = content.rfind('}');
+        if (pos != std::string::npos) {
+          content.insert(pos, ",\n  \"led_disabled\": 0\n");
+          std::ofstream out(SENDSPIN_CONF, std::ios::trunc);
+          out << content;
+        }
+      }
     }
   }
 
@@ -211,7 +296,7 @@ class LedColorController {
     if (r == base_r_ && g == base_g_ && b == base_b_) return;
     base_r_ = r; base_g_ = g; base_b_ = b;
     playing_ = true;
-    start_breathing();
+    if (!led_disabled_) start_breathing();
   }
 
   // Reset to default color (called on track change before color arrives)
@@ -220,7 +305,7 @@ class LedColorController {
     base_r_ = 0x40; base_g_ = 0x80; base_b_ = 0xFF;
     loudness_peak_ = 0;
     smooth_bright_ = 0.0f;
-    if (playing_) {
+    if (playing_ && !led_disabled_) {
       sysfs_mode_ = false;
       start_breathing();
     }
@@ -229,7 +314,7 @@ class LedColorController {
   // Beat flash: briefly shows full brightness then fades back
   void pulse() {
     std::lock_guard<std::mutex> lock(mu_);
-    if (!playing_) return;
+    if (!playing_ || led_disabled_) return;
     int64_t now = now_us();
     if (now < suppress_until_ || now - last_pulse_time_ < 250000) return;
     last_pulse_time_ = now;
@@ -240,6 +325,7 @@ class LedColorController {
   void set_loudness(uint16_t loudness) {
     std::lock_guard<std::mutex> lock(mu_);
     if (!playing_ || now_us() < suppress_until_) return;
+    if (led_disabled_) return;
 
     // On first loudness frame, stop tr-ledring so we own sysfs exclusively
     if (!sysfs_mode_) {
@@ -294,6 +380,7 @@ class LedColorController {
     sysfs_mode_ = false;
     loudness_peak_ = 0;
     smooth_bright_ = 0.0f;
+    if (led_disabled_) return;
     fprintf(stderr, "[sendspin] LED resume #%02x%02x%02x\n", base_r_, base_g_, base_b_);
     start_breathing();
   }
@@ -305,13 +392,35 @@ class LedColorController {
     sysfs_mode_ = false;
   }
 
+  // Toggle LED effect on/off
+  void toggle_enabled() {
+    std::lock_guard<std::mutex> lock(mu_);
+    led_disabled_ = !led_disabled_;
+    write_json_int(SENDSPIN_CONF, "led_disabled", led_disabled_ ? 1 : 0);
+    fprintf(stderr, "[sendspin] LED %s\n", led_disabled_ ? "disabled" : "enabled");
+    if (led_disabled_) {
+      send_led_idle();
+      write_sysfs("/sys/class/leds/RGB_R/brightness", 0);
+      write_sysfs("/sys/class/leds/RGB_G/brightness", 0);
+      write_sysfs("/sys/class/leds/RGB_B/brightness", 0);
+    } else if (playing_) {
+      sysfs_mode_ = false;
+      start_breathing();
+    }
+  }
+
+  // Load persisted LED state
+  void load_led_state() {
+    int val = read_json_int(SENDSPIN_CONF, "led_disabled");
+    led_disabled_ = (val == 1);
+  }
+
   // Call from main loop to handle suppress expiry
   void tick() {
     std::lock_guard<std::mutex> lock(mu_);
-    if (!playing_) return;
+    if (!playing_ || led_disabled_) return;
     if (suppress_until_ > 0 && now_us() >= suppress_until_) {
       suppress_until_ = 0;
-      // Stop tr-ledring (volume-changed.animation loops indefinitely)
       send_led_idle();
       sysfs_mode_ = true;
     }
@@ -419,6 +528,7 @@ class LedColorController {
   float smooth_bright_{0.0f};
   bool playing_{false};
   bool sysfs_mode_{false};
+  bool led_disabled_{false};
 };
 
 // ============================================================================
@@ -776,6 +886,7 @@ int main(int argc, char *argv[]) {
 
   PulseVolumeController vol_ctrl;
   LedColorController led_ctrl;
+  led_ctrl.load_led_state();
 
   // Player
   PulsePlayerListener player_listener;
@@ -835,10 +946,26 @@ int main(int argc, char *argv[]) {
   fprintf(stderr, "[sendspin] listening as \"%s\"\n", friendly_name.c_str());
   if (!connect_url.empty()) client.connect_to(connect_url);
 
+  // Tap key monitor (keycode 353 on /dev/input/event0)
+  InputMonitor tap_monitor("/dev/input/event0", 353, g_tap_action);
+  tap_monitor.start();
+
   int poll_count = 0;
   while (g_running) {
     client.loop();
     led_ctrl.tick();
+
+    int tap = g_tap_action.exchange(0);
+    if (tap == 1) {
+      // Single tap: play/pause toggle based on group playback state
+      if (client.get_group_state().playback_state == SendspinPlaybackState::PLAYING)
+        controller.send_command(SendspinControllerCommand::PAUSE);
+      else
+        controller.send_command(SendspinControllerCommand::PLAY);
+    } else if (tap == 2) {
+      // Double tap: toggle LED effect
+      led_ctrl.toggle_enabled();
+    }
 
     if (++poll_count >= 30) {
       poll_count = 0;

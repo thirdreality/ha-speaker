@@ -160,7 +160,6 @@ case $1 in
     "Voldown") vol "down" ;;
     "SetVolume") set_volume "$2" ;;
     "Home") echo "home was pressed";;
-    "Tap") echo "tap was pressed";;
     "longpressTap") change_wifi ;;
     "Mute") mic_mute ;;
     "longpressHome") factory_reset ;;
