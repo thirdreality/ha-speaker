@@ -8,7 +8,7 @@
 #
 ################################################################################
 
-LINUX_VOICE_ASSISTANT_CPP_VERSION = 0.0.1
+LINUX_VOICE_ASSISTANT_CPP_VERSION = 1.0.0
 LINUX_VOICE_ASSISTANT_CPP_SITE = $(TOPDIR)/package/thirdreality/linux-voice-assistant-cpp
 LINUX_VOICE_ASSISTANT_CPP_SITE_METHOD = local
 LINUX_VOICE_ASSISTANT_CPP_LICENSE = Apache-2.0

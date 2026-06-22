@@ -167,6 +167,7 @@ add_executable(linux-voice-assistant-cpp
     src/audio/LibMpvPlayer.cpp
     src/audio/PcmRingBuffer.cpp
     src/audio/AudioCapture.cpp
+    src/audio/ExternalWakeWord.cpp
     src/audio/MicroFeatures.cpp
     src/audio/MicroWakeWord.cpp
     src/audio/OpenWakeWord.cpp

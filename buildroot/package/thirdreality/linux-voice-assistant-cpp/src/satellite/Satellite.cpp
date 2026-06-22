@@ -1,9 +1,11 @@
 #include "satellite/Satellite.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <utility>
 #include <vector>
 
+#include "audio/ExternalWakeWord.h"
 #include "audio/IAudioPlayer.h"
 #include "audio/MicroWakeWord.h"
 #include "audio/OpenWakeWord.h"
@@ -491,6 +493,21 @@ void Satellite::OnMuted() {
     }
 }
 
+std::filesystem::path Satellite::ResolveWakeWordConfig(
+    const std::string& id) {
+    const auto local_path = state_.wakeword_dir / (id + ".json");
+    if (std::filesystem::exists(local_path)) {
+        return local_path;
+    }
+
+    const auto it = external_wake_words_.find(id);
+    if (it == external_wake_words_.end()) {
+        return {};
+    }
+    return lva::audio::DownloadExternalWakeWord(it->second,
+                                                state_.wakeword_dir);
+}
+
 bool Satellite::HandleMessage(std::uint32_t msg_type_id,
                               const ::google::protobuf::MessageLite& msg) {
     using namespace lva::proto;
@@ -499,7 +516,6 @@ bool Satellite::HandleMessage(std::uint32_t msg_type_id,
         case kIdVoiceAssistantConfigurationRequest: {
             const auto& cfg_req =
                 static_cast<const ::VoiceAssistantConfigurationRequest&>(msg);
-            (void)cfg_req;
 
             ::VoiceAssistantConfigurationResponse resp;
             resp.set_max_active_wake_words(2);
@@ -513,6 +529,37 @@ bool Satellite::HandleMessage(std::uint32_t msg_type_id,
                 for (const auto& lang : info.trained_languages) {
                     ww->add_trained_languages(lang);
                 }
+            }
+
+            external_wake_words_.clear();
+            for (int i = 0; i < cfg_req.external_wake_words_size(); ++i) {
+                const auto& eww = cfg_req.external_wake_words(i);
+                if (eww.model_type() != "micro") {
+                    LVA_LOGD(kTag, "skipping external wake word '%s' "
+                                   "(type=%s, not micro)",
+                             eww.id().c_str(), eww.model_type().c_str());
+                    continue;
+                }
+
+                lva::audio::ExternalWakeWordInfo info;
+                info.id         = eww.id();
+                info.wake_word  = eww.wake_word();
+                info.model_type = eww.model_type();
+                info.model_size = eww.model_size();
+                info.model_hash = eww.model_hash();
+                info.url        = eww.url();
+                for (int l = 0; l < eww.trained_languages_size(); ++l) {
+                    info.trained_languages.push_back(eww.trained_languages(l));
+                }
+
+                auto* ww = resp.add_available_wake_words();
+                ww->set_id(info.id);
+                ww->set_wake_word(info.wake_word);
+                for (const auto& lang : info.trained_languages) {
+                    ww->add_trained_languages(lang);
+                }
+
+                external_wake_words_.emplace(eww.id(), std::move(info));
             }
 
             // Active: currently loaded in engine (micro + open). Snapshot
@@ -534,8 +581,10 @@ bool Satellite::HandleMessage(std::uint32_t msg_type_id,
                 state_.broadcast(kIdVoiceAssistantConfigurationResponse,
                                  resp);
             }
-            LVA_LOGI(kTag, "ConfigurationRequest: %d available, %d active",
+            LVA_LOGI(kTag, "ConfigurationRequest: %d available "
+                           "(%zu external), %d active",
                      resp.available_wake_words_size(),
+                     external_wake_words_.size(),
                      resp.active_wake_words_size());
             return true;
         }
@@ -555,10 +604,16 @@ bool Satellite::HandleMessage(std::uint32_t msg_type_id,
             int load_failures = 0;
             for (int i = 0; i < set_req.active_wake_words_size(); ++i) {
                 const auto& ww_id = set_req.active_wake_words(i);
-                const auto json_path =
-                    state_.wakeword_dir / (ww_id + ".json");
+                const auto json_path = ResolveWakeWordConfig(ww_id);
+                if (json_path.empty()) {
+                    ++load_failures;
+                    LVA_LOGW(kTag, "SetConfiguration: cannot resolve '%s'",
+                             ww_id.c_str());
+                    continue;
+                }
                 const std::string type =
-                    lva::audio::ReadWakeWordType(state_.wakeword_dir, ww_id);
+                    lva::audio::ReadWakeWordType(json_path.parent_path(),
+                                                 ww_id);
 
                 bool loaded = false;
                 if (type == "open") {

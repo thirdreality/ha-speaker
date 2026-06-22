@@ -6,8 +6,11 @@
 #include <cstdint>
 #include <functional>
 #include <google/protobuf/message_lite.h>
+#include <map>
 #include <string>
 #include <vector>
+
+#include "audio/ExternalWakeWord.h"
 
 namespace lva::audio    { class WakeWordEngine; class PcmRingBuffer; class IAudioPlayer; }
 namespace lva::state    { class ServerState; }
@@ -89,6 +92,11 @@ class Satellite {
     double pre_duck_volume_  = 1.0;
 
     std::atomic<std::int64_t> refractory_until_ns_{0};
+
+    std::map<std::string, lva::audio::ExternalWakeWordInfo>
+        external_wake_words_;
+
+    std::filesystem::path ResolveWakeWordConfig(const std::string& id);
 };
 
 }  // namespace lva::satellite
