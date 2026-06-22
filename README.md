@@ -14,6 +14,10 @@ The firmware consists of two main application components:
 - **Voice** — built on [linux-voice-assistant-cpp](buildroot/package/thirdreality/linux-voice-assistant-cpp/), a C++ rewrite of [OHF-Voice/linux-voice-assistant](https://github.com/OHF-Voice/linux-voice-assistant.git). Implements the ESPHome native API so Home Assistant discovers the speaker as a voice satellite. See its [README](buildroot/package/thirdreality/linux-voice-assistant-cpp/README.md) for details.
 - **Music** — built on [Sendspin](https://www.sendspin-audio.com/), a lightweight streaming protocol integrated with [Music Assistant](https://www.music-assistant.io/).
 
+<div align="center">
+  <img src="doc/images/button_functions.png" alt="button-functions" width="600">
+</div>
+
 ---
 
 - [Voice\&Music Assistant](#voicemusic-assistant)
@@ -22,7 +26,9 @@ The firmware consists of two main application components:
     - [Docker Build](#docker-build)
     - [Native Build](#native-build)
   - [Flash](#flash)
-  - [Serial debugging](#serial-debugging)
+  - [Debugging](#debugging)
+    - [Serial](#serial)
+    - [SSH](#ssh)
   - [Setup the voice assist](#setup-the-voice-assist)
   - [Setup through HA APP](#setup-through-ha-app)
   - [Smart Home control with voice](#smart-home-control-with-voice)
@@ -102,7 +108,9 @@ The generated image is located at:
 </div>
 
 
-## Serial debugging
+## Debugging
+
+### Serial
 
 1. Use debug board to connect the speaker to the PC. Make sure to use data cables.
 
@@ -111,6 +119,15 @@ The generated image is located at:
 <div align="left">
   <img src="doc/images/serial-debug.png" alt="serial-debug" width="400">
 </div>
+
+### SSH
+
+```bash
+ssh root@<device-ip>
+```
+
+- Username: `root`
+- Password: `hello3r`
 
 ## Setup the voice assist
 
