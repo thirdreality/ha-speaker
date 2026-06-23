@@ -400,6 +400,11 @@ int main(int argc, char** argv) {
     state.announce_player  = announce_player.get();
     state.music_player     = music_player.get();
 
+    // Set initial volume on announce player to match music player.
+    if (state.preferences.volume.has_value()) {
+        announce_player->SetVolume(*state.preferences.volume);
+    }
+
     std::uint32_t next_key = 0;
 
     {

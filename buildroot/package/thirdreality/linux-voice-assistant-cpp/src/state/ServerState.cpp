@@ -42,6 +42,9 @@ void ServerState::PersistVolume(double new_volume) {
     preferences.volume = clamped;
     lva::tr::SetSystemVolume(static_cast<int>(clamped * 100.0 + 0.5));
     lva::tr::ShowVolumeChanged();
+    if (announce_player != nullptr) {
+        announce_player->SetVolume(clamped);
+    }
     if (media_player_entity != nullptr) {
         media_player_entity->BroadcastState();
     }
