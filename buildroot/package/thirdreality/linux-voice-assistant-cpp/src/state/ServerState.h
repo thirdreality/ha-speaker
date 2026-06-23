@@ -39,6 +39,8 @@ class ServerState {
     std::atomic<double> volume{1.0};
     std::atomic<int>    mic_volume_live{100}; // 1–100, read by capture thread
 
+    std::int64_t continue_conversation_delay_ns = 500'000'000LL;
+
     class ::lva::audio::AudioCapture* audio_capture = nullptr;
 
     class ::lva::satellite::Satellite* satellite = nullptr;

@@ -86,6 +86,7 @@ void Satellite::OnStopDetected() {
         announce_player_->Stop();
         pipeline_active_       = false;
         continue_conversation_ = false;
+        continue_listen_at_ns_.store(0, std::memory_order_relaxed);
         Unduck();
         lva::tr::Show(lva::tr::LedState::Idle);
     }
@@ -197,6 +198,22 @@ void Satellite::StopAudioStreaming() {
     LVA_LOGD(kTag, "stopped streaming audio to HA");
 }
 
+void Satellite::BeginListening() {
+    // Drain stale mic audio captured during TTS playback before re-streaming.
+    {
+        std::int16_t scratch[1024];
+        while (mic_ring_.Read(scratch, 1024) > 0) {}
+    }
+    lva::tr::Show(lva::tr::LedState::Listening);
+    is_streaming_audio_ = true;
+    pipeline_active_    = true;
+    if (state_.broadcast) {
+        ::VoiceAssistantRequest req;
+        req.set_start(true);
+        state_.broadcast(lva::proto::kIdVoiceAssistantRequest, req);
+    }
+}
+
 void Satellite::PlayTts() {
     if (tts_url_.empty()) {
         LVA_LOGW(kTag, "PlayTts called with empty url");
@@ -222,20 +239,20 @@ void Satellite::PlayTts() {
             broadcast(lva::proto::kIdVoiceAssistantAnnounceFinished, done);
         }
         if (continue_conversation_) {
-            // Multi-turn: restart the pipeline immediately.
-            LVA_LOGI(kTag, "TTS done — continuing conversation");
-            lva::tr::Show(lva::tr::LedState::Listening);
-            is_streaming_audio_ = true;
-            // Drain stale mic audio before re-streaming.
-            {
-                std::int16_t scratch[1024];
-                while (mic_ring_.Read(scratch, 1024) > 0) {}
-            }
-            if (broadcast) {
-                ::VoiceAssistantRequest req;
-                req.set_start(true);
-                broadcast(lva::proto::kIdVoiceAssistantRequest, req);
-            }
+            LVA_LOGI(kTag, "TTS done — continuing conversation after %lld ms",
+                     static_cast<long long>(
+                         state_.continue_conversation_delay_ns / 1'000'000));
+            // TTS has finished playing; show Thinking during the settle delay
+            // instead of leaving the LED on Speaking. BeginListening() will
+            // switch to Listening once the mic actually opens.
+            lva::tr::Show(lva::tr::LedState::Thinking);
+            const auto now_ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count();
+            continue_listen_at_ns_.store(
+                now_ns + state_.continue_conversation_delay_ns,
+                std::memory_order_release);
         } else {
             pipeline_active_ = false;
             lva::tr::Show(lva::tr::LedState::Idle);
@@ -263,20 +280,21 @@ void Satellite::PlayAnnounce(const std::string& media_id,
                 broadcast(lva::proto::kIdVoiceAssistantAnnounceFinished, done);
             }
             if (continue_conversation_) {
-                // Start listening after the announcement.
-                LVA_LOGI(kTag, "announce done — starting conversation");
-                lva::tr::Show(lva::tr::LedState::Listening);
-                is_streaming_audio_ = true;
-                pipeline_active_    = true;
-                {
-                    std::int16_t scratch[1024];
-                    while (mic_ring_.Read(scratch, 1024) > 0) {}
-                }
-                if (broadcast) {
-                    ::VoiceAssistantRequest req;
-                    req.set_start(true);
-                    broadcast(lva::proto::kIdVoiceAssistantRequest, req);
-                }
+                LVA_LOGI(kTag, "announce done — continuing conversation "
+                               "after %lld ms",
+                         static_cast<long long>(
+                             state_.continue_conversation_delay_ns
+                             / 1'000'000));
+                // Show Thinking during the settle delay; BeginListening()
+                // switches to Listening when the mic opens.
+                lva::tr::Show(lva::tr::LedState::Thinking);
+                const auto now_ns =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+                continue_listen_at_ns_.store(
+                    now_ns + state_.continue_conversation_delay_ns,
+                    std::memory_order_release);
             } else {
                 pipeline_active_ = false;
                 lva::tr::Show(lva::tr::LedState::Idle);
@@ -464,6 +482,26 @@ void Satellite::OnLoopTick() {
         StartPipeline(snap.model_id);
     }
 
+    // Open the mic for a continued conversation once the settle delay elapses.
+    const auto listen_at = continue_listen_at_ns_.load(std::memory_order_acquire);
+    if (listen_at != 0) {
+        const auto now_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (now_ns >= listen_at) {
+            continue_listen_at_ns_.store(0, std::memory_order_relaxed);
+            if (state_.muted.load(std::memory_order_relaxed)) {
+                LVA_LOGD(kTag, "continued conversation skipped: muted");
+                pipeline_active_ = false;
+                lva::tr::Show(lva::tr::LedState::Idle);
+                Unduck();
+            } else {
+                LVA_LOGI(kTag, "settle delay elapsed — listening");
+                BeginListening();
+            }
+        }
+    }
+
     // Pump mic audio to HA while pipeline is active.
     PumpAudioToHa();
 }
@@ -474,6 +512,7 @@ void Satellite::OnDisconnected() {
     StopTimerRing();
     pipeline_active_       = false;
     continue_conversation_ = false;
+    continue_listen_at_ns_.store(0, std::memory_order_relaxed);
     Unduck();
     lva::tr::Show(lva::tr::LedState::Idle);
     if (announce_player_) announce_player_->Stop();
@@ -484,6 +523,7 @@ void Satellite::OnDisconnected() {
 
 void Satellite::OnMuted() {
     StopAudioStreaming();
+    continue_listen_at_ns_.store(0, std::memory_order_relaxed);
     if (pipeline_active_ && announce_player_) {
         announce_player_->Stop();
         pipeline_active_       = false;

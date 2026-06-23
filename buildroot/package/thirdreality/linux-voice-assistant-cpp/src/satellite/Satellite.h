@@ -50,6 +50,8 @@ class Satellite {
     // Begins streaming after the wake-up "ding" sound finishes.
     void OpenStreamToHa(const std::string& wake_word_phrase);
     void StopAudioStreaming();
+    // Open the mic and ask HA to start listening (continued conversation).
+    void BeginListening();
     void PumpAudioToHa();
     void OnVoiceEvent(int event_type,
                       const std::vector<std::pair<std::string, std::string>>& data);
@@ -78,11 +80,17 @@ class Satellite {
     PendingWake       pending_wake_data_;
 
     // Pipeline state. Mostly mirrors the Python class's flags.
-    bool   is_streaming_audio_ = false;
-    bool   pipeline_active_    = false;
-    bool   continue_conversation_ = false;
+    // These are accessed from both the main epoll thread (OnVoiceEvent,
+    // mpv completion callbacks, OnLoopTick) and the wake-word engine thread
+    // (OnStopDetected) / mute path (OnMuted), so they must be atomic to avoid
+    // a data race.
+    std::atomic<bool> is_streaming_audio_{false};
+    std::atomic<bool> pipeline_active_{false};
+    std::atomic<bool> continue_conversation_{false};
     std::string tts_url_;
     bool   tts_played_         = false;
+
+    std::atomic<std::int64_t> continue_listen_at_ns_{0};
 
     bool                                  timer_ringing_ = false;
     std::chrono::steady_clock::time_point timer_ring_start_{};

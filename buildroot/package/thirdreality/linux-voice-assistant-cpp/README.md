@@ -66,6 +66,9 @@ All options:
 --capture-mic-channel <n>  0-based mic channel in ALSA stream (default: 0)
 --capture-ref-channels <c> Comma-separated 0-based ref channels for AEC;
                            empty or "none" disables AEC (default: 2,3)
+--continue-conversation-delay <s>
+                           Seconds to wait after TTS finishes before opening
+                           the mic for a continued conversation (default: 0.5)
 --debug                    Enable debug logging
 --help                     Show help
 ```

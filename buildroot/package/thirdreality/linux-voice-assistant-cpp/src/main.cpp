@@ -122,6 +122,10 @@ void PrintUsage(const char* argv0) {
         "                           stream (default: 0)\n"
         "  --capture-ref-channels   Comma-separated 0-based ref channels;\n"
         "                           empty/none disables AEC. (default: 2,3)\n"
+        "  --continue-conversation-delay <s>\n"
+        "                           Seconds to wait after TTS finishes before\n"
+        "                           opening the mic for a continued\n"
+        "                           conversation (default: 0.5)\n"
         "  --debug                  Enable debug logging\n"
         "  --help                   Show this help and exit\n",
         argv0);
@@ -141,6 +145,8 @@ struct CliOptions {
     int         capture_mic_channel = 0;
     std::string capture_ref_channels = "2,3";
 
+    double      continue_conversation_delay = 0.5;  // seconds
+
     bool debug = false;
 };
 
@@ -157,6 +163,7 @@ bool ParseCli(int argc, char** argv, CliOptions& out) {
         {"capture-alsa-device",   required_argument, nullptr, 'A'},
         {"capture-mic-channel",   required_argument, nullptr, 'M'},
         {"capture-ref-channels",  required_argument, nullptr, 'R'},
+        {"continue-conversation-delay", required_argument, nullptr, 'C'},
         {"debug",                 no_argument,       nullptr, 'd'},
         {"help",                  no_argument,       nullptr, 'h'},
         {nullptr,                 0,                 nullptr, 0  },
@@ -176,6 +183,18 @@ bool ParseCli(int argc, char** argv, CliOptions& out) {
             case 'A': out.capture_alsa_device = optarg; break;
             case 'M': out.capture_mic_channel = std::atoi(optarg); break;
             case 'R': out.capture_ref_channels = optarg; break;
+            case 'C': {
+                char* end = nullptr;
+                const double v = std::strtod(optarg, &end);
+                if (end == optarg || v < 0.0) {
+                    std::fprintf(stderr,
+                                 "Invalid --continue-conversation-delay: %s\n",
+                                 optarg);
+                    return false;
+                }
+                out.continue_conversation_delay = v;
+                break;
+            }
             case 'p': {
                 const long v = std::strtol(optarg, nullptr, 10);
                 if (v <= 0 || v > 65535) {
@@ -279,6 +298,8 @@ int main(int argc, char** argv) {
                       std::memory_order_relaxed);
     state.mic_volume_live.store(state.preferences.mic_volume,
                                 std::memory_order_relaxed);
+    state.continue_conversation_delay_ns =
+        static_cast<std::int64_t>(cli.continue_conversation_delay * 1e9);
 
     auto mic_mute_gpio = std::make_unique<lva::tr::MicMuteGpio>(state);
     state.mic_mute_gpio = mic_mute_gpio.get();
