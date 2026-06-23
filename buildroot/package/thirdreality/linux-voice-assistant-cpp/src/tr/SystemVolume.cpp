@@ -11,6 +11,8 @@
 #include <cstring>
 #include <string>
 
+#include <pulse/volume.h>
+
 #include "util/Log.h"
 
 extern char** environ;
@@ -21,12 +23,18 @@ namespace {
 
 constexpr const char* kTag = "trvol";
 
+void FormatPaVolume(int percent, char* buf, size_t buf_size) {
+    const double linear = std::clamp(percent, 0, 100) / 100.0;
+    const pa_volume_t pa_vol = pa_sw_volume_from_linear(linear);
+    std::snprintf(buf, buf_size, "%u", (unsigned)pa_vol);
+}
+
 }  // namespace
 
 void SetSystemVolume(int percent) {
     const int clamped = std::clamp(percent, 0, 100);
     char arg_buf[16];
-    std::snprintf(arg_buf, sizeof(arg_buf), "%d%%", clamped);
+    FormatPaVolume(clamped, arg_buf, sizeof(arg_buf));
 
     char prog[]   = "/usr/bin/pactl";
     char a1[]     = "set-sink-volume";
@@ -50,15 +58,15 @@ void SetSystemVolume(int percent) {
         LVA_LOGW(kTag, "pactl spawn failed: %s", std::strerror(rc));
         return;
     }
-    LVA_LOGI(kTag, "SetVolume %d%% (pid=%d)", clamped, (int)pid);
+    LVA_LOGI(kTag, "SetVolume %d%% -> pa_vol=%s (pid=%d)",
+             clamped, arg_buf, (int)pid);
 }
 
 void SetSystemVolumeSilent(int percent) {
     const int clamped = std::clamp(percent, 0, 100);
     char arg_buf[16];
-    std::snprintf(arg_buf, sizeof(arg_buf), "%d%%", clamped);
+    FormatPaVolume(clamped, arg_buf, sizeof(arg_buf));
 
-    // pactl set-sink-volume @DEFAULT_SINK@ <N>%
     char prog[]   = "/usr/bin/pactl";
     char a1[]     = "set-sink-volume";
     char a2[]     = "@DEFAULT_SINK@";
@@ -81,7 +89,8 @@ void SetSystemVolumeSilent(int percent) {
         LVA_LOGW(kTag, "pactl spawn failed: %s", std::strerror(rc));
         return;
     }
-    LVA_LOGI(kTag, "SetVolumeSilent %d%% (pid=%d)", clamped, (int)pid);
+    LVA_LOGI(kTag, "SetVolumeSilent %d%% -> pa_vol=%s (pid=%d)",
+             clamped, arg_buf, (int)pid);
 }
 
 }  // namespace lva::tr

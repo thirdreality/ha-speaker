@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <utility>
@@ -263,7 +264,9 @@ void LibMpvPlayer::Stop() {
 void LibMpvPlayer::SetVolume(double normalized) {
     user_volume_ = Clamp01(normalized);
     if (mpv_ == nullptr) return;
-    double percent = user_volume_ * 100.0;
+    // Use sqrt curve to match sendspin's software attenuation.
+    // This gives a gentler rolloff: 50% → ~71% output.
+    double percent = std::sqrt(user_volume_) * 100.0;
     if (const int rc = mpv_set_property(mpv_, "volume",
                                         MPV_FORMAT_DOUBLE, &percent);
         rc < 0) {

@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -585,11 +586,25 @@ class PulsePlayerListener : public PlayerRoleListener {
     size_t aligned = length - (length % frame_size_);
     if (aligned == 0) return length;
 
-    if (g_ducked.load(std::memory_order_relaxed)) {
+    // Software volume attenuation — mirrors MPV's internal volume behavior
+    // so that both paths produce consistent loudness at the same volume%.
+    // Uses square-root curve: gain = sqrt(vol/100) for a gentler rolloff.
+    {
       auto *samples = reinterpret_cast<int16_t *>(data);
       size_t count = aligned / sizeof(int16_t);
-      for (size_t i = 0; i < count; ++i)
-        samples[i] = static_cast<int16_t>(samples[i] >> 2);
+      const int vol = last_volume_;
+      if (g_ducked.load(std::memory_order_relaxed)) {
+        // Duck: reduce to ~25% of current software volume
+        const int32_t gain = static_cast<int32_t>(
+            std::sqrt(vol / 100.0) * 0.25 * 256.0);
+        for (size_t i = 0; i < count; ++i)
+          samples[i] = static_cast<int16_t>((samples[i] * gain) >> 8);
+      } else if (vol < 100) {
+        const int32_t gain = static_cast<int32_t>(
+            std::sqrt(vol / 100.0) * 256.0);  // 50% → gain=181 (~71%)
+        for (size_t i = 0; i < count; ++i)
+          samples[i] = static_cast<int16_t>((samples[i] * gain) >> 8);
+      }
     }
 
     int err = 0;
