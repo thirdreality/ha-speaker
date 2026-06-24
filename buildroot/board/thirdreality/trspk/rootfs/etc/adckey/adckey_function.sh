@@ -43,7 +43,7 @@ vol() {
 do_volume_change() {
     action="$1"
     count="${2:-1}"
-    
+
     exec 200>"$LOCK_FILE"
     flock -x 200
 
@@ -63,7 +63,8 @@ do_volume_change() {
         vol=0
     fi
 
-    pactl set-sink-volume @DEFAULT_SINK@ "$vol"% > /dev/null 2>&1
+    # PA sink volume is set by linux-voice-assistant-cpp (via SoundConfWatcher)
+    # using the perceptual curve. Do not set it here to avoid conflicts.
 
     echo "Volume $action (x${count}): $vol%"
 
@@ -120,25 +121,23 @@ mic_mute() {
 set_volume() {
     vol="$1"
     [ -z "$vol" ] && exit 1
-    
+
     if [ "$vol" -ge 100 ]; then
         vol=100
     elif [ "$vol" -le 0 ]; then
         vol=0
     fi
-    
+
     exec 200>"$LOCK_FILE"
     flock -x 200
-    
-    pactl set-sink-volume @DEFAULT_SINK@ "$vol"% > /dev/null 2>&1
-    
+
     tmpfile=$(mktemp)
     jq --argjson v "$vol" '.volume = $v' "$SOUND_CONF" > "$tmpfile" && mv "$tmpfile" "$SOUND_CONF"
     sync
-    
+
     flock -u 200
     exec 200>&-
-    
+
     echo "SetVolume: $vol%"
     dbus-send --system --type=signal /com/3r/EventBus com._3reality.EventBus.LedShow boolean:false array:string:'/usr/share/thirdreality/animation/volume-changed.animation'
 }
