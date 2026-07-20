@@ -66,11 +66,11 @@ ensure_dns_config()
         return 0
     fi
     
-    if ! grep -q "nameserver $dns_server" /etc/resolv.conf; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Adding nameserver $dns_server to /etc/resolv.conf"
+    if ! grep -q "^nameserver" /etc/resolv.conf; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] No nameserver present, adding fallback $dns_server to /etc/resolv.conf"
         echo "nameserver $dns_server" >> /etc/resolv.conf
     else
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] DNS config OK (nameserver $dns_server exists)"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] DNS config OK (nameserver already present)"
     fi
 }
 
