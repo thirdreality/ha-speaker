@@ -28,6 +28,7 @@ The firmware consists of two main application components:
   - [Flash](#flash)
   - [Debugging](#debugging)
     - [Serial](#serial)
+    - [ADB](#adb)
     - [SSH](#ssh)
   - [Setup the voice assist](#setup-the-voice-assist)
   - [Setup through HA APP](#setup-through-ha-app)
@@ -119,6 +120,53 @@ The generated image is located at:
 <div align="left">
   <img src="doc/images/serial-debug.png" alt="serial-debug" width="400">
 </div>
+
+### ADB
+
+ADB is enabled on development images and starts automatically at boot
+(`/etc/init.d/S55adbd`). It listens over **USB** and, by default, also over
+**TCP** on port `5555`.
+
+> **Warning:** the TCP socket binds to `0.0.0.0` with no authentication.
+> Anyone on the same network can obtain a root shell. To disable TCP, set `ADB_TCP_PORT=` in `/etc/default/adbd`
+> (USB stays available).
+
+**USB** — connect a Type-C data cable to the PC:
+
+```bash
+adb devices
+adb shell
+```
+
+**TCP** — over the network (device and PC on the same LAN):
+
+```bash
+adb connect <device-ip>:5555
+adb shell
+```
+
+**Multiple devices** — when more than one device is connected, `adb shell`
+fails with `more than one device/emulator`. You must first list the devices and
+then target one explicitly with `-s <serial>`. The serial differs by transport:
+
+- **USB** devices are listed by their **MAC address** (for example `a1b2c3d4e5f6`).
+- **TCP** devices are listed as **`<ip>:5555`** (for example `10.1.0.33:5555`).
+
+```bash
+$ adb devices
+List of devices attached
+a1b2c3d4e5f6    device        # USB, serial is the MAC address
+10.1.0.33:5555  device        # TCP, serial is <ip>:5555
+
+# pick the USB device by its MAC address
+adb -s a1b2c3d4e5f6 shell
+
+# pick the TCP device by its <ip>:5555
+adb -s 10.1.0.33:5555 shell
+```
+
+Note: the same speaker connected over both USB and TCP shows up as two separate
+entries with different serials.
 
 ### SSH
 

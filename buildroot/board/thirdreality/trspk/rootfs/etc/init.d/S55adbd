@@ -1,0 +1,211 @@
+#!/bin/sh
+#
+# S55adbd: Android Debug Bridge daemon over USB (FunctionFS gadget) + TCP.
+#
+# The Amlogic 5.4 kernel exposes an Android-style ConfigFS USB gadget
+# (CONFIG_USB_CONFIGFS_UEVENT). adbd (android-tools 5.1.1) talks to the
+# host through FunctionFS. This script:
+#   1. builds a ConfigFS gadget with a single ffs.adb function,
+#   2. mounts FunctionFS at /dev/usb-ffs/adb,
+#   3. starts adbd, which writes the endpoint descriptors,
+#   4. binds the gadget to the device-mode UDC once the endpoints exist.
+#
+# UDC name and ConfigFS paths come from the board DTS (dwc2_a @ ff400000,
+# port-type = slave) and the Amlogic BSP (aml-commonlib usb_monitor).
+#
+# SECURITY: ro.adb.secure defaults to 0 and adbd keeps root privileges in
+# this build, so anyone with USB access -- or network access when the TCP
+# port below is enabled -- gets an unauthenticated root shell. Intended for
+# development images only.
+
+DAEMON=/usr/bin/adbd
+NAME=adbd
+PIDFILE=/var/run/adbd.pid
+
+CONFIGFS=/sys/kernel/config
+GADGET=$CONFIGFS/usb_gadget/g1
+FFS_DIR=/dev/usb-ffs/adb
+
+# Device-mode USB controller (see axg_s420_v03trspk.dts: dwc2_a @ ff400000).
+UDC_NAME=ff400000.dwc2_a
+
+# USB identity. Values are cosmetic: host-side adb matches the interface
+# class/subclass/protocol advertised by the ffs.adb function, not VID/PID.
+ID_VENDOR=0x18d1
+ID_PRODUCT=0x4ee7
+BCD_DEVICE=0x0100
+BCD_USB=0x0200
+MANUFACTURER="ThirdReality"
+PRODUCT="Voice Music Assistant"
+
+# TCP listening. When non-empty, adbd listens on this TCP port *in addition*
+# to USB, via the ADBD_TCP_PORT env var (see the android-tools5
+# 0007-adbd-tcp-port-from-env patch). This rootfs has no Android property
+# service, so the usual service.adb.tcp.port property path cannot work.
+# Leave empty to disable TCP (USB only).
+#
+# WARNING: the TCP socket binds to 0.0.0.0 and adbd runs as root with
+# ro.adb.secure=0, so anyone on the network gets an unauthenticated root
+# shell. Keep this to development images only.
+ADB_TCP_PORT=5555
+
+# Allow overriding ADB_TCP_PORT / UDC_NAME without editing this file.
+[ -r /etc/default/adbd ] && . /etc/default/adbd
+
+serialnumber() {
+	# Derive a stable serial from the first MAC we can find; fall back to
+	# the board default-name or a fixed value. adbd uses this as the
+	# device id shown by "adb devices".
+	for dev in wlan0 eth0; do
+		if [ -r "/sys/class/net/$dev/address" ]; then
+			s=$(sed 's/://g' "/sys/class/net/$dev/address")
+			if [ -n "$s" ] && [ "$s" != "000000000000" ]; then
+				echo "$s"
+				return
+			fi
+		fi
+	done
+	if [ -x /etc/init.d/get_sysname.sh ]; then
+		s=$(/etc/init.d/get_sysname.sh 2>/dev/null | tr -cd 'A-Za-z0-9')
+		[ -n "$s" ] && { echo "$s"; return; }
+	fi
+	echo "trspk0123456789"
+}
+
+mount_configfs() {
+	if [ ! -d $CONFIGFS/usb_gadget ]; then
+		mount -t configfs none $CONFIGFS 2>/dev/null
+	fi
+	[ -d $CONFIGFS/usb_gadget ]
+}
+
+build_gadget() {
+	mkdir -p $GADGET || return 1
+
+	echo $ID_VENDOR  > $GADGET/idVendor
+	echo $ID_PRODUCT > $GADGET/idProduct
+	echo $BCD_DEVICE > $GADGET/bcdDevice
+	echo $BCD_USB    > $GADGET/bcdUSB
+
+	mkdir -p $GADGET/strings/0x409
+	echo "$(serialnumber)" > $GADGET/strings/0x409/serialnumber
+	echo "$MANUFACTURER"   > $GADGET/strings/0x409/manufacturer
+	echo "$PRODUCT"        > $GADGET/strings/0x409/product
+
+	# adb function (FunctionFS). "ffs.adb" -> mount source "adb".
+	mkdir -p $GADGET/functions/ffs.adb
+
+	mkdir -p $GADGET/configs/c.1/strings/0x409
+	echo "adb" > $GADGET/configs/c.1/strings/0x409/configuration
+	echo 500   > $GADGET/configs/c.1/MaxPower
+
+	if [ ! -e $GADGET/configs/c.1/ffs.adb ]; then
+		ln -s $GADGET/functions/ffs.adb $GADGET/configs/c.1/ffs.adb
+	fi
+}
+
+mount_ffs() {
+	mkdir -p $FFS_DIR
+	if ! grep -q " $FFS_DIR " /proc/mounts 2>/dev/null; then
+		mount -t functionfs adb $FFS_DIR || return 1
+	fi
+}
+
+bind_udc() {
+	# adbd must have written the descriptors (ep1 present) before the
+	# gadget can bind to the controller.
+	i=0
+	while [ ! -e $FFS_DIR/ep1 ] && [ $i -lt 50 ]; do
+		usleep 100000
+		i=$((i + 1))
+	done
+	if [ -e /sys/class/udc/$UDC_NAME ]; then
+		echo "$UDC_NAME" > $GADGET/UDC 2>/dev/null
+	else
+		# Fall back to the first available UDC.
+		udc=$(ls /sys/class/udc 2>/dev/null | head -n1)
+		[ -n "$udc" ] && echo "$udc" > $GADGET/UDC 2>/dev/null
+	fi
+}
+
+start() {
+	printf "Starting %s: " "$NAME"
+
+	if [ ! -x $DAEMON ]; then
+		echo "SKIP (no $DAEMON)"
+		return 0
+	fi
+
+	if ! mount_configfs; then
+		echo "FAIL (no configfs / gadget support)"
+		return 1
+	fi
+
+	if ! build_gadget; then
+		echo "FAIL (cannot build gadget)"
+		return 1
+	fi
+
+	if ! mount_ffs; then
+		echo "FAIL (cannot mount functionfs)"
+		return 1
+	fi
+
+	# adbd reads ADBD_TCP_PORT directly (0007-adbd-tcp-port-from-env patch)
+	# and then listens on that TCP port in addition to USB.
+	if [ -n "$ADB_TCP_PORT" ]; then
+		export ADBD_TCP_PORT="$ADB_TCP_PORT"
+	fi
+
+	start-stop-daemon -S -q -b -m -p $PIDFILE --exec $DAEMON
+	if [ $? -ne 0 ]; then
+		echo "FAIL (adbd)"
+		return 1
+	fi
+
+	bind_udc
+	echo "OK"
+}
+
+stop() {
+	printf "Stopping %s: " "$NAME"
+
+	# Unbind from the controller first.
+	[ -w $GADGET/UDC ] && echo "" > $GADGET/UDC 2>/dev/null
+
+	start-stop-daemon -K -q -p $PIDFILE 2>/dev/null
+	rm -f $PIDFILE
+
+	# Tear down the gadget (order matters for ConfigFS).
+	if [ -d $GADGET ]; then
+		rm -f $GADGET/configs/c.1/ffs.adb 2>/dev/null
+		rmdir $GADGET/configs/c.1/strings/0x409 2>/dev/null
+		rmdir $GADGET/configs/c.1 2>/dev/null
+		rmdir $GADGET/functions/ffs.adb 2>/dev/null
+		rmdir $GADGET/strings/0x409 2>/dev/null
+		rmdir $GADGET 2>/dev/null
+	fi
+
+	grep -q " $FFS_DIR " /proc/mounts 2>/dev/null && umount $FFS_DIR 2>/dev/null
+
+	echo "OK"
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		stop
+		start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+exit $?

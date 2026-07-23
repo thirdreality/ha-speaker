@@ -1,0 +1,38 @@
+From ab8de5d91fa74718c38f17804f1725c3d3149f84 Mon Sep 17 00:00:00 2001
+From: "tianwei.ge" <tianwei.ge@thirdreality.ai>
+Date: Thu, 23 Jul 2026 15:52:48 +0800
+Subject: [PATCH] allow enabling TCP transport via ADBD_TCP_PORT env var
+
+---
+ system/core/adb/adb.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/system/core/adb/adb.c b/system/core/adb/adb.c
+index cae7bdb..19699ce 100644
+--- a/system/core/adb/adb.c
++++ b/system/core/adb/adb.c
+@@ -1403,10 +1403,17 @@ int adb_main(int is_daemon, int server_port)
+         usb = 1;
+     }
+ 
+-    // If one of these properties is set, also listen on that port
+-    // If one of the properties isn't set and we couldn't listen on usb,
+-    // listen on the default port.
+-    property_get("service.adb.tcp.port", value, "");
++    // If one of these is set, also listen on that TCP port.
++    // If none is set and we couldn't listen on usb, listen on the default port.
++    // ADBD_TCP_PORT (plain env var) takes precedence: this rootfs has no
++    // Android property service, so property_get() can never return a value.
++    const char* env_tcp_port = getenv("ADBD_TCP_PORT");
++    if (env_tcp_port != NULL && env_tcp_port[0]) {
++        strncpy(value, env_tcp_port, sizeof(value) - 1);
++        value[sizeof(value) - 1] = '\0';
++    } else {
++        property_get("service.adb.tcp.port", value, "");
++    }
+     if (!value[0]) {
+         property_get("persist.adb.tcp.port", value, "");
+     }
+-- 
+2.40.1
+
