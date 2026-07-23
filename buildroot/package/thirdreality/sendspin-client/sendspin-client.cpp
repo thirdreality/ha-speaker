@@ -190,7 +190,7 @@ class FilePersistenceProvider : public SendspinPersistenceProvider {
     std::ifstream test(SENDSPIN_CONF);
     if (!test) {
       std::ofstream out(SENDSPIN_CONF, std::ios::trunc);
-      out << "{\n  \"last_server_hash\": 0,\n  \"static_delay_ms\": 0,\n  \"led_disabled\": 0\n}\n";
+      out << "{\n  \"last_server_hash\": 0,\n  \"static_delay_ms\": 0,\n  \"led_disabled\": 1\n}\n";
     } else {
       // Check if led_disabled field exists, add it if missing
       std::string content((std::istreambuf_iterator<char>(test)),
@@ -199,7 +199,7 @@ class FilePersistenceProvider : public SendspinPersistenceProvider {
       if (content.find("\"led_disabled\"") == std::string::npos) {
         auto pos = content.rfind('}');
         if (pos != std::string::npos) {
-          content.insert(pos, ",\n  \"led_disabled\": 0\n");
+          content.insert(pos, ",\n  \"led_disabled\": 1\n");
           std::ofstream out(SENDSPIN_CONF, std::ios::trunc);
           out << content;
         }
@@ -412,8 +412,11 @@ class LedColorController {
 
   // Load persisted LED state
   void load_led_state() {
+    // Music LED defaults to disabled (see FilePersistenceProvider, which
+    // seeds /data/conf/sendspin.json with led_disabled=1). Only an explicit
+    // stored 0 (user enabled via double-tap) turns the music LED on.
     int val = read_json_int(SENDSPIN_CONF, "led_disabled");
-    led_disabled_ = (val == 1);
+    led_disabled_ = (val != 0);
   }
 
   // Call from main loop to handle suppress expiry
@@ -745,13 +748,12 @@ class VisualizerListener : public VisualizerRoleListener {
     fprintf(stderr, "[sendspin] visualizer stream ended\n");
   }
 
-  void on_beat(int64_t) override {
+  void on_beat(int64_t, bool) override {
     if (led_) led_->pulse();
   }
 
-  void on_visualizer_frame(const VisualizerFrame &frame) override {
-    if (frame.loudness.has_value() && led_)
-      led_->set_loudness(*frame.loudness);
+  void on_loudness(int64_t, uint16_t loudness) override {
+    if (led_) led_->set_loudness(loudness);
   }
 
  private:
@@ -946,7 +948,7 @@ int main(int argc, char *argv[]) {
   VisualizerRoleConfig viz_config;
   viz_config.support.types = {VisualizerDataType::BEAT, VisualizerDataType::LOUDNESS};
   viz_config.support.buffer_capacity = 8192;
-  viz_config.support.batch_max = 4;
+  viz_config.support.rate_max = 30;
   auto &visualizer = client.add_visualizer(std::move(viz_config));
   visualizer.set_listener(&visualizer_listener);
 
@@ -974,9 +976,9 @@ int main(int argc, char *argv[]) {
     if (tap == 1) {
       // Single tap: play/pause toggle based on group playback state
       if (client.get_group_state().playback_state == SendspinPlaybackState::PLAYING)
-        controller.send_command(SendspinControllerCommand::PAUSE);
+        controller.send_command({.command = SendspinControllerCommand::PAUSE});
       else
-        controller.send_command(SendspinControllerCommand::PLAY);
+        controller.send_command({.command = SendspinControllerCommand::PLAY});
     } else if (tap == 2) {
       // Double tap: toggle LED effect
       led_ctrl.toggle_enabled();
