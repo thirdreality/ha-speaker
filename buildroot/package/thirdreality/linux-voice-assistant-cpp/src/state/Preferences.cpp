@@ -8,6 +8,9 @@
 #include <sstream>
 #include <system_error>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <nlohmann/json.hpp>
 
 #include "util/Log.h"
@@ -97,6 +100,8 @@ void PopulateFromJson(Preferences& out,
     out.wake_word_1_sensitivity = load_optional_double("wake_word_1_sensitivity");
     out.wake_word_2_sensitivity = load_optional_double("wake_word_2_sensitivity");
     out.stop_word_sensitivity   = load_optional_double("stop_word_sensitivity");
+    out.continue_conversation_delay =
+        load_optional_double("continue_conversation_delay");
 }
 
 void ApplyToJson(const Preferences& prefs, nlohmann::json& obj) {
@@ -143,6 +148,8 @@ void ApplyToJson(const Preferences& prefs, nlohmann::json& obj) {
     store_optional_double("wake_word_1_sensitivity", prefs.wake_word_1_sensitivity);
     store_optional_double("wake_word_2_sensitivity", prefs.wake_word_2_sensitivity);
     store_optional_double("stop_word_sensitivity",   prefs.stop_word_sensitivity);
+    store_optional_double("continue_conversation_delay",
+                          prefs.continue_conversation_delay);
 }
 
 }  // namespace
@@ -226,20 +233,49 @@ bool Preferences::SaveToFile(const std::filesystem::path& storage_path) const {
     ApplyToJson(*this, obj);
 
     const auto tmp_path = storage_path.string() + ".tmp";
+    const std::string payload = obj.dump(4) + '\n';
+
+    // Write + fsync the temp file, atomically rename, then fsync the
+    // parent directory. Without the fsyncs the data can sit in the page
+    // cache and be lost if power is cut right after saving.
+    const int fd = ::open(tmp_path.c_str(),
+                          O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        LVA_LOGW(kTag, "failed to open %s for write: %s",
+                 tmp_path.c_str(), std::strerror(errno));
+        return false;
+    }
     {
-        std::ofstream file(tmp_path);
-        if (!file) {
-            LVA_LOGW(kTag, "failed to open %s for write: %s",
-                     tmp_path.c_str(), std::strerror(errno));
-            return false;
+        std::size_t off = 0;
+        bool write_ok = true;
+        while (off < payload.size()) {
+            const ssize_t n = ::write(fd, payload.data() + off,
+                                      payload.size() - off);
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                LVA_LOGW(kTag, "write to %s failed: %s",
+                         tmp_path.c_str(), std::strerror(errno));
+                write_ok = false;
+                break;
+            }
+            off += static_cast<std::size_t>(n);
         }
-        file << obj.dump(4) << '\n';
-        if (!file.good()) {
-            LVA_LOGW(kTag, "write to %s failed", tmp_path.c_str());
+        if (write_ok && ::fsync(fd) != 0) {
+            LVA_LOGW(kTag, "fsync %s failed: %s",
+                     tmp_path.c_str(), std::strerror(errno));
+            write_ok = false;
+        }
+        if (::close(fd) != 0 && write_ok) {
+            LVA_LOGW(kTag, "close %s failed: %s",
+                     tmp_path.c_str(), std::strerror(errno));
+            write_ok = false;
+        }
+        if (!write_ok) {
             std::filesystem::remove(tmp_path, ec);
             return false;
         }
     }
+
     std::filesystem::rename(tmp_path, storage_path, ec);
     if (ec) {
         LVA_LOGW(kTag, "rename %s -> %s failed: %s",
@@ -247,6 +283,19 @@ bool Preferences::SaveToFile(const std::filesystem::path& storage_path) const {
                  ec.message().c_str());
         std::filesystem::remove(tmp_path, ec);
         return false;
+    }
+
+    // Persist the directory entry (the rename) to disk as well.
+    const auto dir = storage_path.has_parent_path()
+                         ? storage_path.parent_path()
+                         : std::filesystem::path(".");
+    const int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);
+    if (dfd >= 0) {
+        if (::fsync(dfd) != 0) {
+            LVA_LOGW(kTag, "fsync dir %s failed: %s",
+                     dir.c_str(), std::strerror(errno));
+        }
+        ::close(dfd);
     }
     return true;
 }

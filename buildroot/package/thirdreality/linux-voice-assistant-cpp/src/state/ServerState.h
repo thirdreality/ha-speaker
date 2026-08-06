@@ -89,6 +89,10 @@ class ServerState {
     // Bump thinking_sound similarly (0/1).
     void PersistThinkingSound(bool enabled);
 
+    // Persist the continued-conversation listen delay (seconds) and
+    // apply it to the live satellite timing.
+    void PersistContinueConversationDelay(double seconds);
+
     // Bump wake_word_N_sensitivity (1-based n in {1, 2}).
     void PersistWakeWordSensitivity(int n, double value);
     void PersistStopWordSensitivity(double value);

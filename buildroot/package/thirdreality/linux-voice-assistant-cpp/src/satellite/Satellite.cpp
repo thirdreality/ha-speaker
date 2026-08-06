@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -699,6 +700,21 @@ bool Satellite::HandleMessage(std::uint32_t msg_type_id,
                     if (slot >= 2) break;
                     apply_default(m->config().probability_cutoff);
                 }
+
+                // Persist the selection so it survives a cold reboot.
+                // Store the ids actually loaded, in slot order (micro
+                // first, then open), matching how GetConfiguration
+                // reports the active wake words. Must run before the
+                // std::move below empties the vectors.
+                std::vector<std::optional<std::string>> selected;
+                selected.reserve(new_micro.size() + new_open.size());
+                for (const auto& m : new_micro) {
+                    selected.emplace_back(m->config().id);
+                }
+                for (const auto& m : new_open) {
+                    selected.emplace_back(m->config().id);
+                }
+                state_.preferences.active_wake_words = std::move(selected);
 
                 engine_.SetActiveModels(std::move(new_micro));
                 engine_.SetActiveOpenModels(std::move(new_open));

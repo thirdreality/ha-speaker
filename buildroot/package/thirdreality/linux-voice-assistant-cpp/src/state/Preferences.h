@@ -25,6 +25,11 @@ class Preferences {
     // 0 = disabled, 1 = enabled. Anything outside is treated as 0.
     int thinking_sound = 0;
 
+    // Seconds to keep listening after a turn ends before starting the
+    // next "continued conversation" turn. std::nullopt = use built-in
+    // default (see main.cpp). Persisted across reboots.
+    std::optional<double> continue_conversation_delay;
+
     std::optional<double> wake_word_1_sensitivity;
     std::optional<double> wake_word_2_sensitivity;
     std::optional<double> stop_word_sensitivity;

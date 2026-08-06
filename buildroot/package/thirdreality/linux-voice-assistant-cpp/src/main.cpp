@@ -298,8 +298,15 @@ int main(int argc, char** argv) {
                       std::memory_order_relaxed);
     state.mic_volume_live.store(state.preferences.mic_volume,
                                 std::memory_order_relaxed);
-    state.continue_conversation_delay_ns =
-        static_cast<std::int64_t>(cli.continue_conversation_delay * 1e9);
+    // Prefer the persisted delay; fall back to the CLI default when it
+    // was never set from HA.
+    {
+        const double delay_s =
+            state.preferences.continue_conversation_delay.value_or(
+                cli.continue_conversation_delay);
+        state.continue_conversation_delay_ns =
+            static_cast<std::int64_t>(delay_s * 1e9);
+    }
 
     auto mic_mute_gpio = std::make_unique<lva::tr::MicMuteGpio>(state);
     state.mic_mute_gpio = mic_mute_gpio.get();
@@ -367,16 +374,19 @@ int main(int argc, char** argv) {
         cap_opts, *pcm_ring);
     audio_capture->AddTap(*satellite_ring);
 
-    bool applied_default = false;
+    // Tracks whether we materialized any first-boot default into
+    // preferences; if so we persist once below so /data/conf/sound.json
+    // becomes a complete snapshot of every setting on first run.
+    bool prefs_dirty = false;
     if (state.preferences.mic_auto_gain == 0) {
         state.preferences.mic_auto_gain = 10;
-        applied_default = true;
+        prefs_dirty = true;
     }
     if (state.preferences.mic_noise_suppression == 0) {
         state.preferences.mic_noise_suppression = 2;  // Medium NS
-        applied_default = true;
+        prefs_dirty = true;
     }
-    if (applied_default) {
+    if (prefs_dirty) {
         LVA_LOGI(kTag,
                  "applied first-boot mic defaults: agc=%d, ns=%d",
                  state.preferences.mic_auto_gain,
@@ -484,6 +494,28 @@ int main(int argc, char** argv) {
             },
             .setter        = [&state](double v) {
                 state.PersistStopWordSensitivity(v);
+            },
+        }));
+
+    // Continued-conversation listen delay (seconds). Persisted so it
+    // survives a cold reboot; getter falls back to the CLI-derived
+    // default when never set.
+    state.entities.push_back(std::make_unique<lva::entities::NumberEntity>(
+        next_key++,
+        lva::entities::NumberEntity::Config{
+            .object_id     = "continue_conversation_delay",
+            .display_name  = "Continue Conversation Delay",
+            .icon          = "mdi:timer-sand",
+            .min_value     = 0.0,
+            .max_value     = 10.0,
+            .step          = 0.1,
+            .mode_enum     = 1,  // BOX
+            .getter        = [&state, default_ccd = cli.continue_conversation_delay] {
+                return state.preferences.continue_conversation_delay.value_or(
+                    default_ccd);
+            },
+            .setter        = [&state](double v) {
+                state.PersistContinueConversationDelay(v);
             },
         }));
 
@@ -630,33 +662,47 @@ int main(int argc, char** argv) {
         std::make_unique<lva::audio::WakeWordEngine>(*pcm_ring);
 
     {
-        const std::string& list = cli.wakeword_models;
-        std::size_t start = 0;
-        while (start < list.size()) {
-            std::size_t comma = list.find(',', start);
-            if (comma == std::string::npos) comma = list.size();
-            std::string id(list, start, comma - start);
-            while (!id.empty() && std::isspace(static_cast<unsigned char>(id.front()))) id.erase(0,1);
-            while (!id.empty() && std::isspace(static_cast<unsigned char>(id.back())))  id.pop_back();
-            if (!id.empty()) {
-                const auto json_path = wakeword_dir / (id + ".json");
-                if (use_openwakeword) {
-                    auto model = lva::audio::OpenWakeWord::FromConfig(json_path);
-                    if (model && model->Ok()) {
-                        wakeword_engine->AddOpenModel(std::move(model));
-                    } else {
-                        LVA_LOGW(kTag, "failed to load OWW '%s'", id.c_str());
-                    }
+        // Prefer the persisted selection (survives cold reboot); fall
+        // back to the CLI default only when nothing was ever saved.
+        std::vector<std::string> ids;
+        for (const auto& slot : state.preferences.active_wake_words) {
+            if (slot.has_value() && !slot->empty()) ids.push_back(*slot);
+        }
+        if (ids.empty()) {
+            const std::string& list = cli.wakeword_models;
+            std::size_t start = 0;
+            while (start < list.size()) {
+                std::size_t comma = list.find(',', start);
+                if (comma == std::string::npos) comma = list.size();
+                std::string id(list, start, comma - start);
+                while (!id.empty() && std::isspace(static_cast<unsigned char>(id.front()))) id.erase(0,1);
+                while (!id.empty() && std::isspace(static_cast<unsigned char>(id.back())))  id.pop_back();
+                if (!id.empty()) ids.push_back(std::move(id));
+                start = comma + 1;
+            }
+            LVA_LOGI(kTag, "no persisted wake words; using CLI default '%s'",
+                     cli.wakeword_models.c_str());
+        } else {
+            LVA_LOGI(kTag, "loading %zu persisted wake word(s)", ids.size());
+        }
+
+        for (const auto& id : ids) {
+            const auto json_path = wakeword_dir / (id + ".json");
+            if (use_openwakeword) {
+                auto model = lva::audio::OpenWakeWord::FromConfig(json_path);
+                if (model && model->Ok()) {
+                    wakeword_engine->AddOpenModel(std::move(model));
                 } else {
-                    auto model = lva::audio::MicroWakeWord::FromConfig(json_path);
-                    if (model && model->Ok()) {
-                        wakeword_engine->AddModel(std::move(model));
-                    } else {
-                        LVA_LOGW(kTag, "failed to load wake word '%s'", id.c_str());
-                    }
+                    LVA_LOGW(kTag, "failed to load OWW '%s'", id.c_str());
+                }
+            } else {
+                auto model = lva::audio::MicroWakeWord::FromConfig(json_path);
+                if (model && model->Ok()) {
+                    wakeword_engine->AddModel(std::move(model));
+                } else {
+                    LVA_LOGW(kTag, "failed to load wake word '%s'", id.c_str());
                 }
             }
-            start = comma + 1;
         }
     }
 
@@ -679,6 +725,93 @@ int main(int argc, char** argv) {
             wakeword_engine->AddModel(std::move(stop_model));
         } else {
             LVA_LOGW(kTag, "stop word model not loaded");
+        }
+    }
+
+    // Apply persisted sensitivities to the freshly loaded models. The
+    // model files carry a built-in default cutoff; without this the
+    // user's saved wake/stop sensitivities are silently ignored after a
+    // (cold) reboot even though HA shows the stored slider value. Slot
+    // ordering mirrors PersistWakeWordSensitivity(): non-stop micro
+    // models first, then open models; the stop model is separate.
+    {
+        std::size_t wake_idx = 0;
+        const auto micro_models = wakeword_engine->SnapshotModels();
+        for (const auto& m : micro_models) {
+            if (m->config().id == "stop") {
+                if (state.preferences.stop_word_sensitivity.has_value()) {
+                    m->SetProbabilityCutoff(static_cast<float>(
+                        *state.preferences.stop_word_sensitivity));
+                }
+                continue;
+            }
+            const auto& slot = (wake_idx == 0)
+                ? state.preferences.wake_word_1_sensitivity
+                : state.preferences.wake_word_2_sensitivity;
+            if (wake_idx < 2 && slot.has_value()) {
+                m->SetProbabilityCutoff(static_cast<float>(*slot));
+            }
+            ++wake_idx;
+        }
+        const auto open_models = wakeword_engine->SnapshotOpenModels();
+        for (const auto& m : open_models) {
+            const auto& slot = (wake_idx == 0)
+                ? state.preferences.wake_word_1_sensitivity
+                : state.preferences.wake_word_2_sensitivity;
+            if (wake_idx < 2 && slot.has_value()) {
+                m->SetProbabilityCutoff(static_cast<float>(*slot));
+            }
+            ++wake_idx;
+        }
+    }
+
+    // Materialize first-boot defaults for the optional settings so that
+    // /data/conf/sound.json ends up holding an explicit value for every
+    // configuration item, not just the ones the user has touched. Only
+    // fill slots that have a real wake-word model loaded; the stop-word
+    // default is only meaningful in micro mode (where a stop model
+    // exists). Anything already set (loaded from disk) is left as-is.
+    {
+        const double wake_default = use_openwakeword
+            ? kDefaultOpenWakeSensitivity
+            : kDefaultMicroWakeSensitivity;
+        std::size_t loaded_wake_words =
+            wakeword_engine->SnapshotOpenModels().size();
+        for (const auto& m : wakeword_engine->SnapshotModels()) {
+            if (m->config().id != "stop") ++loaded_wake_words;
+        }
+
+        if (loaded_wake_words >= 1 &&
+            !state.preferences.wake_word_1_sensitivity.has_value()) {
+            state.preferences.wake_word_1_sensitivity = wake_default;
+            prefs_dirty = true;
+        }
+        if (loaded_wake_words >= 2 &&
+            !state.preferences.wake_word_2_sensitivity.has_value()) {
+            state.preferences.wake_word_2_sensitivity = wake_default;
+            prefs_dirty = true;
+        }
+        if (!use_openwakeword &&
+            !state.preferences.stop_word_sensitivity.has_value()) {
+            state.preferences.stop_word_sensitivity = kDefaultStopSensitivity;
+            prefs_dirty = true;
+        }
+        if (!state.preferences.continue_conversation_delay.has_value()) {
+            state.preferences.continue_conversation_delay =
+                cli.continue_conversation_delay;
+            prefs_dirty = true;
+        }
+    }
+
+    // Persist once if any first-boot default was materialized above, so
+    // the on-disk config is complete after the very first run.
+    if (prefs_dirty) {
+        if (state.SavePreferences()) {
+            LVA_LOGI(kTag, "persisted complete config to %s",
+                     state.preferences_path.c_str());
+        } else {
+            LVA_LOGW(kTag, "failed to persist first-boot config to %s",
+                     state.preferences_path.c_str());
         }
     }
 

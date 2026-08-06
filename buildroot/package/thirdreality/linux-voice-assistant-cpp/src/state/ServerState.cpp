@@ -95,6 +95,21 @@ void ServerState::PersistThinkingSound(bool enabled) {
     }
 }
 
+void ServerState::PersistContinueConversationDelay(double seconds) {
+    const double clamped = std::clamp(seconds, 0.0, 10.0);
+    if (preferences.continue_conversation_delay.has_value() &&
+        std::abs(*preferences.continue_conversation_delay - clamped) < 1e-4) {
+        return;
+    }
+    preferences.continue_conversation_delay = clamped;
+    continue_conversation_delay_ns =
+        static_cast<std::int64_t>(clamped * 1e9);
+    if (!SavePreferences()) {
+        LVA_LOGW(kTag, "PersistContinueConversationDelay(%.3f): save failed",
+                 clamped);
+    }
+}
+
 void ServerState::PersistWakeWordSensitivity(int n, double value) {
     auto& slot = (n == 1) ? preferences.wake_word_1_sensitivity
                           : preferences.wake_word_2_sensitivity;
