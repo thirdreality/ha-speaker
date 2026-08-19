@@ -386,11 +386,17 @@ int main(int argc, char** argv) {
         state.preferences.mic_noise_suppression = 2;  // Medium NS
         prefs_dirty = true;
     }
+    if (state.preferences.mic_volume == 100) {
+        state.preferences.mic_volume = 1600;
+        state.mic_volume_live.store(1600, std::memory_order_relaxed);
+        prefs_dirty = true;
+    }
     if (prefs_dirty) {
         LVA_LOGI(kTag,
-                 "applied first-boot mic defaults: agc=%d, ns=%d",
+                 "applied first-boot mic defaults: agc=%d, ns=%d, vol=%d",
                  state.preferences.mic_auto_gain,
-                 state.preferences.mic_noise_suppression);
+                 state.preferences.mic_noise_suppression,
+                 state.preferences.mic_volume);
     }
 
     const bool aec_enabled = use_alsa_backend &&
@@ -575,7 +581,7 @@ int main(int argc, char** argv) {
             .display_name  = "Mic Volume",
             .icon          = "mdi:microphone-settings",
             .min_value     = 1.0,
-            .max_value     = 100.0,
+            .max_value     = 4000.0,
             .step          = 1.0,
             .mode_enum     = 0,  // AUTO
             .getter        = [&state] {

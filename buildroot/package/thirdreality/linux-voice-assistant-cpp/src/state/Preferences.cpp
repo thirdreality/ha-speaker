@@ -88,7 +88,7 @@ void PopulateFromJson(Preferences& out,
     out.mic_auto_gain         = CoerceInt(obj.value("mic_auto_gain", 0), 0);
     out.mic_noise_suppression = CoerceInt(obj.value("mic_noise_suppression", 0), 0);
     out.mic_volume = std::clamp(
-        CoerceInt(obj.value("mic_volume", 100), 100), 1, 100);
+        CoerceInt(obj.value("mic_volume", 1600), 1600), 1, 4000);
 
     auto load_optional_double = [&](const char* key) -> std::optional<double> {
         if (auto it = obj.find(key);

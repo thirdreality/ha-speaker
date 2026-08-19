@@ -38,7 +38,7 @@ class Preferences {
     int mic_auto_gain         = 0;
     int mic_noise_suppression = 0;
 
-    int mic_volume = 100;
+    int mic_volume = 1600;
 
     // sound.json-only fields. Round-tripped verbatim.
     int mic_gain = 30;   // analog gain knob, 0..100, hardware-defined

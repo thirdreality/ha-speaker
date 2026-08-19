@@ -190,7 +190,7 @@ void ServerState::PersistMicNoiseSuppression(int value) {
 }
 
 void ServerState::PersistMicVolume(int value) {
-    const int clamped = std::clamp(value, 1, 100);
+    const int clamped = std::clamp(value, 1, 4000);
     if (preferences.mic_volume == clamped) return;
     preferences.mic_volume = clamped;
     mic_volume_live.store(clamped, std::memory_order_relaxed);

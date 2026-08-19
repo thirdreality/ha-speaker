@@ -198,7 +198,7 @@ void AudioCapture::Stop() {
 void AudioCapture::PostFrame(std::int16_t* mic, std::size_t n) {
     if (mic_volume_ptr_ != nullptr) {
         const int vol = mic_volume_ptr_->load(std::memory_order_relaxed);
-        if (vol > 0 && vol < 100) {
+        if (vol > 0 && vol != 100) {
             const float gain = static_cast<float>(vol) / 100.0f;
             for (std::size_t i = 0; i < n; ++i) {
                 const long scaled =
