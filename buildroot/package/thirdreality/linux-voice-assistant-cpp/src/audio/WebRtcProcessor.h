@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -22,6 +23,16 @@ class WebRtcProcessor {
 
     void SetLevels(int agc_level, int ns_level);
 
+    // Enable/disable actual echo cancellation at runtime. AEC must only
+    // run while there is genuine far-end playback (music/TTS), otherwise
+    // the hardware-loopback reference carries only crosstalk (~25 dB
+    // hotter than the mic, weakly correlated) and AEC3's residual/NLP
+    // stage mistakes near-end speech for echo and zero-gates it. Called
+    // from the main thread on player state changes; no-op when AEC was
+    // not configured (no reference channels). Cheap: the capture thread
+    // applies the toggle only on transition.
+    void SetFarEndActive(bool active);
+
     bool Process(std::int16_t* buf, std::size_t n);
 
     bool ProcessReverse(std::int16_t* buf, std::size_t n);
@@ -39,6 +50,13 @@ class WebRtcProcessor {
    private:
     // Caller must hold apm_mutex_.
     void RebuildLocked();
+    // Build the APM Config from the current agc/ns/aec fields, with the
+    // echo canceller enabled only when echo_on is true. Caller must hold
+    // apm_mutex_.
+    void ApplyConfigLocked(bool echo_on);
+    // Reconcile the applied echo state with the desired far-end gate.
+    // Caller must hold apm_mutex_.
+    void ReconcileGateLocked();
 
     // Serializes all access to apm_: Process()/ProcessReverse()/
     // ResetEcho() run on the capture thread, SetLevels() on the main
@@ -48,6 +66,12 @@ class WebRtcProcessor {
     int  agc_level_   = 0;
     int  ns_level_    = 0;
     bool aec_enabled_ = false;
+
+    // Desired far-end state (main thread) vs. the echo-canceller state
+    // currently applied to the APM (capture thread). The capture thread
+    // reconciles them on transition inside Process().
+    std::atomic<bool> far_end_active_{false};
+    bool              echo_on_applied_ = false;
 
     void* apm_ = nullptr;
     std::unique_ptr<webrtc::StreamConfig> stream_cfg_;
